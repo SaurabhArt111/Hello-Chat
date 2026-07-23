@@ -77,6 +77,15 @@ async function translateWithGoogle(text, targetCode) {
   return { translatedText, detectedLanguage };
 }
 
+// Google's unofficial endpoint rate-limits by IP ("Too Many Requests"), and on
+// a shared host like Render that limit gets hit fast once several users are
+// translating at once. Retrying it on every message just floods the logs and
+// adds latency for no benefit, since it will keep failing until the window
+// clears. Trip a short circuit breaker on 429 so we skip straight to
+// "return original text" for a cooldown period, and only log once per trip.
+const GOOGLE_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+let googleBlockedUntil = 0;
+
 /**
  * Translate text to target language. Auto-detects source.
  * @param {string} text - Text to translate
@@ -96,11 +105,28 @@ export async function translateTo(text, targetLanguage) {
     }
   }
 
-  // Fallback to Google
+  // Fallback to Google, unless we recently got rate-limited and are still
+  // in the cooldown window - in that case skip straight to original text.
+  if (Date.now() < googleBlockedUntil) {
+    return { translatedText: text, detectedLanguage: "en" };
+  }
+
   try {
     return await translateWithGoogle(text, targetCode);
   } catch (googleErr) {
-    console.warn("Google translate failed:", googleErr.message);
+    const isRateLimited = /too many requests|429/i.test(
+      googleErr.message || ""
+    );
+    if (isRateLimited) {
+      googleBlockedUntil = Date.now() + GOOGLE_COOLDOWN_MS;
+      console.warn(
+        `Google translate rate-limited, pausing translation for ${
+          GOOGLE_COOLDOWN_MS / 1000
+        }s`
+      );
+    } else {
+      console.warn("Google translate failed:", googleErr.message);
+    }
   }
 
   // Both failed: return original text

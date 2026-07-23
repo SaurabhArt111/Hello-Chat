@@ -46,6 +46,8 @@ import {
   Phone,
   Settings,
   User,
+  Menu as MenuIcon,
+  ChevronRight,
 } from "lucide-react";
 import { useToastContext } from "../context/ToastContext";
 import { motion, AnimatePresence } from "framer-motion";
@@ -80,6 +82,7 @@ const Home = () => {
   const [groups, setGroups] = useState([]);
   const [search, setSearch] = useState("");
   const [activePanel, setActivePanel] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false); // mobile "Menu" bottom-sheet (Contacts/Calls/Discover/Alerts/Settings/Profile)
   const [activeView, setActiveView] = useState("chats"); // chats, contacts, calls
   const [createGroupModalOpen, setCreateGroupModalOpen] = useState(false);
   const [scheduleMessageModalOpen, setScheduleMessageModalOpen] = useState(false);
@@ -132,31 +135,11 @@ const Home = () => {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [floatingDateLabel, setFloatingDateLabel] = useState("");
   const [unreadSeparatorMessageId, setUnreadSeparatorMessageId] = useState(null);
-  const [mobileNavPage, setMobileNavPage] = useState(0);
-  const [mobileNavPages, setMobileNavPages] = useState(1);
-  const mobileNavScrollRef = useRef(null);
   const isAtBottomRef = useRef(true);
   const [currentScrollTop, setCurrentScrollTop] = useState(0);
   const scrollRafRef = useRef(null);
   const lastActiveChatIdRef = useRef(null);
 
-  useEffect(() => {
-    const updateMobileNavPagination = () => {
-      const el = mobileNavScrollRef.current;
-      if (!el) return;
-      const pageWidth = Math.max(el.clientWidth, 1);
-      const total = Math.max(1, Math.ceil(el.scrollWidth / pageWidth));
-      const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
-      const progress = maxScroll > 0 ? el.scrollLeft / maxScroll : 0;
-      const page = Math.round(progress * (total - 1));
-      setMobileNavPages(total);
-      setMobileNavPage(page);
-    };
-
-    updateMobileNavPagination();
-    window.addEventListener("resize", updateMobileNavPagination);
-    return () => window.removeEventListener("resize", updateMobileNavPagination);
-  }, []);
 
   const queueConversationCacheWrite = useCallback((conversationId, list) => {
     if (!conversationId || !Array.isArray(list)) return;
@@ -2635,94 +2618,85 @@ const Home = () => {
         </div>
       )}
 
-      {/* Mobile/Tablet Bottom Navigation — horizontal slider */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-neutral-800 border-t border-gray-200 dark:border-neutral-700 py-1 pb-[env(safe-area-inset-bottom)]">
-        <div
-          ref={mobileNavScrollRef}
-          onScroll={() => {
-            const el = mobileNavScrollRef.current;
-            if (!el) return;
-            const pageWidth = Math.max(el.clientWidth, 1);
-            const total = Math.max(1, Math.ceil(el.scrollWidth / pageWidth));
-            const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
-            const progress = maxScroll > 0 ? el.scrollLeft / maxScroll : 0;
-            setMobileNavPages(total);
-            setMobileNavPage(Math.round(progress * (total - 1)));
-          }}
-          className="flex items-center overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-        <button
-          type="button"
-          onClick={() => { setActiveView("chats"); setActivePanel(null); setSidebarOpen((o) => !o); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activeView === "chats" && sidebarOpen ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <MessageCircle size={20} />
-          <span className="text-[10px] font-medium">Chats</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => { setActiveView("contacts"); setActivePanel(null); setSidebarOpen((o) => !o); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activeView === "contacts" && sidebarOpen ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <UsersIcon size={20} />
-          <span className="text-[10px] font-medium">Contacts</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => { setActiveView("calls"); setActivePanel(null); setSidebarOpen(false); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activeView === "calls" ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <Phone size={20} />
-          <span className="text-[10px] font-medium">Calls</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => { setSidebarOpen(false); setActivePanel((p) => p === "settings" ? null : "settings"); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activePanel === "settings" ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <Settings size={20} />
-          <span className="text-[10px] font-medium">Settings</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => { setSidebarOpen(false); setProfilePanelShowSelf(true); setActivePanel((p) => p === "profile" ? null : "profile"); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activePanel === "profile" ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <User size={20} />
-          <span className="text-[10px] font-medium">Profile</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => { setSidebarOpen(false); setActivePanel((p) => p === "requests" ? null : "requests"); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activePanel === "requests" ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <Bell size={20} />
-          <span className="text-[10px] font-medium">Alerts</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => { setSidebarOpen(false); setActivePanel((p) => p === "users" ? null : "users"); }}
-          className={`shrink-0 w-[20%] flex flex-col items-center gap-0.5 px-1 py-1.5 rounded-lg transition-colors ${activePanel === "users" ? "text-emerald-500" : "text-gray-500 dark:text-neutral-400"}`}
-        >
-          <UserPlus size={20} />
-          <span className="text-[10px] font-medium">Discover</span>
-        </button>
+      {/* Mobile/Tablet Bottom Navigation — just Chats + Menu. Everything else
+          (Contacts, Calls, Discover, Alerts, Settings, Profile) lives in the
+          Menu sheet below, since those are occasional destinations, not
+          something you tap several times a minute like the chat list. */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-neutral-800 border-t border-gray-200 dark:border-neutral-700 py-1.5 pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center justify-around px-2">
+          <button
+            type="button"
+            onClick={() => { setActiveView("chats"); setActivePanel(null); setMenuOpen(false); setSidebarOpen(true); }}
+            className={`flex flex-col items-center gap-0.5 px-6 py-1.5 rounded-lg transition-colors ${
+              !menuOpen && activeView !== "calls" && !["settings", "profile", "requests", "users"].includes(activePanel)
+                ? "text-emerald-500"
+                : "text-gray-500 dark:text-neutral-400"
+            }`}
+          >
+            <MessageCircle size={22} />
+            <span className="text-[11px] font-medium">Chats</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMenuOpen(true)}
+            className={`flex flex-col items-center gap-0.5 px-6 py-1.5 rounded-lg transition-colors ${
+              menuOpen || activeView === "calls" || ["settings", "profile", "requests", "users"].includes(activePanel)
+                ? "text-emerald-500"
+                : "text-gray-500 dark:text-neutral-400"
+            }`}
+          >
+            <MenuIcon size={22} />
+            <span className="text-[11px] font-medium">Menu</span>
+          </button>
         </div>
-        {mobileNavPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5 pb-0.5 pt-0.5">
-            {Array.from({ length: mobileNavPages }).map((_, index) => (
-              <span
-                key={`mobile-nav-dot-${index}`}
-                className={`h-1.5 rounded-full transition-all duration-200 ${
-                  mobileNavPage === index
-                    ? "w-4 bg-emerald-500"
-                    : "w-1.5 bg-gray-300 dark:bg-neutral-600"
-                }`}
-              />
-            ))}
-          </div>
-        )}
       </div>
+
+      {/* Menu bottom sheet */}
+      <AnimatePresence>
+        {menuOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="lg:hidden fixed inset-0 z-[60] bg-black/40"
+              onClick={() => setMenuOpen(false)}
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 28, stiffness: 300 }}
+              className="lg:hidden fixed bottom-0 left-0 right-0 z-[61] bg-white dark:bg-neutral-800 rounded-t-2xl shadow-2xl pb-[env(safe-area-inset-bottom)]"
+            >
+              <div className="w-10 h-1 bg-gray-300 dark:bg-neutral-600 rounded-full mx-auto mt-3 mb-2" />
+              <div className="px-2 pb-3">
+                {[
+                  { key: "profile", icon: User, label: "Profile", action: () => { setSidebarOpen(false); setProfilePanelShowSelf(true); setActivePanel("profile"); } },
+                  { key: "contacts-view", icon: UsersIcon, label: "Contacts", action: () => { setActiveView("contacts"); setActivePanel(null); setSidebarOpen(true); } },
+                  { key: "users", icon: UserPlus, label: "Discover People", action: () => { setSidebarOpen(false); setActivePanel("users"); } },
+                  { key: "calls", icon: Phone, label: "Calls", action: () => { setActiveView("calls"); setActivePanel(null); setSidebarOpen(false); } },
+                  { key: "requests", icon: Bell, label: "Alerts", action: () => { setSidebarOpen(false); setActivePanel("requests"); } },
+                  { key: "settings", icon: Settings, label: "Settings", action: () => { setSidebarOpen(false); setActivePanel("settings"); } },
+                ].map(({ key, icon: Icon, label, action }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => { action(); setMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl hover:bg-gray-50 dark:hover:bg-neutral-700/60 transition-colors text-left"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-neutral-700 flex items-center justify-center text-gray-600 dark:text-neutral-300 shrink-0">
+                      <Icon size={19} />
+                    </div>
+                    <span className="flex-1 text-gray-900 dark:text-neutral-100 font-medium">{label}</span>
+                    <ChevronRight size={18} className="text-gray-300 dark:text-neutral-600" />
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

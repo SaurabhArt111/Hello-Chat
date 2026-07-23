@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { FiPlay, FiPause } from "react-icons/fi";
+import { FiPlay, FiPause, FiDownload } from "react-icons/fi";
 
 // Simple pub/sub so starting one voice note pauses any other one that's
 // currently playing, instead of letting multiple play on top of each other.
@@ -100,6 +100,24 @@ const VoiceMessageBubble = ({
   const displaySecs = totalDuration > 0 ? totalDuration : duration || 0;
   const durationStr = `${Math.floor(displaySecs / 60)}:${String(Math.floor(displaySecs % 60)).padStart(2, "0")}`;
 
+  const handleDownload = async (e) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(audioUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = audioUrl.split("/").pop() || "voice-message";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(audioUrl, "_blank", "noopener");
+    }
+  };
+
   const bubbleClasses = `
     w-fit max-w-[280px] px-3 py-2 rounded-2xl shadow-md relative inline-block
     ${isOwn ? "ml-auto rounded-br-md bg-emerald-500 text-white" : "rounded-bl-md bg-white dark:bg-neutral-700 text-gray-900 dark:text-neutral-100 border border-gray-200 dark:border-neutral-600"}
@@ -147,6 +165,15 @@ const VoiceMessageBubble = ({
             </div>
             <p className="text-[10px] opacity-80 mt-1">{durationStr}</p>
           </div>
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="p-1.5 rounded-full hover:bg-black/20 transition-colors shrink-0"
+            aria-label="Download voice message"
+            title="Download"
+          >
+            <FiDownload size={14} />
+          </button>
         </div>
         {time && (
           <p className={`text-[10px] opacity-70 mt-1 ${isOwn ? "text-right" : "text-left"}`}>

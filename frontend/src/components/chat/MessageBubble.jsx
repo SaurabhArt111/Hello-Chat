@@ -3,6 +3,7 @@ import MessageActionsMenu from "./MessageActionsMenu";
 import ReactionPicker from "./ReactionPicker";
 import { Clock } from "lucide-react";
 import { FiFile, FiCheck } from "react-icons/fi";
+import MediaViewerModal from "./MediaViewerModal";
 
 const urlRegex = /(https?:\/\/\S+)/gi;
 
@@ -78,6 +79,7 @@ const MessageBubble = ({
   const [showMenu, setShowMenu] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [editText, setEditText] = useState(text);
   const longPressTimerRef = useRef(null);
   const containerRef = useRef(null);
@@ -241,7 +243,8 @@ const MessageBubble = ({
                   src={file}
                   alt="sent"
                   loading="lazy"
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full"
+                  onClick={() => setViewerOpen(true)}
+                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full cursor-pointer"
                 />
               )}
 
@@ -250,7 +253,8 @@ const MessageBubble = ({
                 <video
                   src={file}
                   controls
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full"
+                  onClick={() => setViewerOpen(true)}
+                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full cursor-pointer"
                 />
               )}
 
@@ -258,12 +262,21 @@ const MessageBubble = ({
               {type === "file" && file && (
                 <a
                   href={file}
+                  download
                   className="text-blue-300 underline"
                   target="_blank"
                   rel="noreferrer"
                 >
                   <FiFile className="inline mr-1" /> {text || "Download File"}
                 </a>
+              )}
+
+              {viewerOpen && (type === "image" || type === "video") && (
+                <MediaViewerModal
+                  url={file}
+                  type={type}
+                  onClose={() => setViewerOpen(false)}
+                />
               )}
             </>
           )}

@@ -3,6 +3,7 @@ import MessageActionsMenu from "./MessageActionsMenu";
 import ReactionPicker from "./ReactionPicker";
 import { useTranslation } from "../../context/TranslationContext";
 import { FiFile } from "react-icons/fi";
+import MediaViewerModal from "./MediaViewerModal";
 
 const urlRegex = /(https?:\/\/\S+)/gi;
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -64,6 +65,7 @@ export default function TranslatedMessageBubble({
   const [showMenu, setShowMenu] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [translating, setTranslating] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const longPressTimerRef = useRef(null);
   const containerRef = useRef(null);
 
@@ -187,7 +189,8 @@ export default function TranslatedMessageBubble({
                   src={message.file}
                   alt="sent"
                   loading="lazy"
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full"
+                  onClick={() => setViewerOpen(true)}
+                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full cursor-pointer"
                 />
               )}
 
@@ -195,19 +198,29 @@ export default function TranslatedMessageBubble({
                 <video
                   src={message.file}
                   controls
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full"
+                  onClick={() => setViewerOpen(true)}
+                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full cursor-pointer"
                 />
               )}
 
               {message.type === "file" && message.file && (
                 <a
                   href={message.file}
+                  download
                   className="underline"
                   target="_blank"
                   rel="noreferrer"
                 >
                   <FiFile className="inline mr-1" /> {message.text || "Download File"}
                 </a>
+              )}
+
+              {viewerOpen && (message.type === "image" || message.type === "video") && (
+                <MediaViewerModal
+                  url={message.file}
+                  type={message.type}
+                  onClose={() => setViewerOpen(false)}
+                />
               )}
             </>
           )}

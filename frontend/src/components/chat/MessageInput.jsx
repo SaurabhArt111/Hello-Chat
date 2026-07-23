@@ -5,6 +5,7 @@ import axios from "../../api/axios";
 import { useToastContext } from "../../context/ToastContext";
 import { compressFileForUpload, FileTooLargeError } from "../../utils/compressFile";
 import { FiPaperclip, FiImage, FiVideo, FiFile, FiCamera, FiMic } from "react-icons/fi";
+import MediaEditorModal from "./MediaEditorModal";
 
 const TYPING_IDLE_MS = 1000;
 
@@ -19,6 +20,7 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
   const [showMenu, setShowMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
+  const [pendingMedia, setPendingMedia] = useState(null); // File awaiting preview/edit before upload
 
   const openFilePicker = () => {
     if (fileRef.current) {
@@ -27,13 +29,37 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
     setShowMenu(false);
   };
 
+  const uploadFile = async (file, messageType, caption = "") => {
+    const user = JSON.parse(localStorage.getItem("user") || "null");
+    const senderId = user?.id || user?._id;
+    if (!senderId || !activeChatId) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("senderId", senderId);
+    if (isGroup) {
+      formData.append("groupId", activeChatId);
+    } else {
+      formData.append("receiverId", activeChatId);
+    }
+    formData.append("messageType", messageType);
+    if (caption) formData.append("text", caption);
+
+    try {
+      const res = await axios.post("/messages/upload", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const saved = res.data;
+      if (onMediaMessage) onMediaMessage(saved);
+    } catch (err) {
+      console.error("Failed to upload media", err);
+      toast.error(err.response?.data?.message || "Failed to upload file");
+    }
+  };
+
   const handleFileChange = async (e) => {
     const rawFile = e.target.files?.[0];
     if (!rawFile || !activeChatId) return;
-
-    const user = JSON.parse(localStorage.getItem("user") || "null");
-    const senderId = user?.id || user?._id;
-    if (!senderId) return;
 
     let file = rawFile;
     try {
@@ -47,37 +73,18 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
       console.error("Compression failed, sending original file:", err);
     }
 
+    // Open the preview/edit screen instead of uploading straight away, so
+    // the user can rotate/draw/add text/filters/caption or just confirm as-is.
+    setPendingMedia(file);
+    e.target.value = "";
+  };
+
+  const handleMediaConfirm = async (finalFile, caption) => {
     let messageType = "file";
-    if (file.type.startsWith("image/")) messageType = "image";
-    else if (file.type.startsWith("video/")) messageType = "video";
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("senderId", senderId);
-    if (isGroup) {
-      formData.append("groupId", activeChatId);
-    } else {
-      formData.append("receiverId", activeChatId);
-    }
-    formData.append("messageType", messageType);
-
-    try {
-      const res = await axios.post("/messages/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      const saved = res.data;
-
-      if (onMediaMessage) {
-        onMediaMessage(saved);
-      }
-    } catch (err) {
-      console.error("Failed to upload media", err);
-      toast.error(err.response?.data?.message || "Failed to upload file");
-    } finally {
-      // Reset input so same file can be chosen again
-      e.target.value = "";
-    }
+    if (finalFile.type.startsWith("image/")) messageType = "image";
+    else if (finalFile.type.startsWith("video/")) messageType = "video";
+    setPendingMedia(null);
+    await uploadFile(finalFile, messageType, caption);
   };
 
   const handleCameraCapture = async () => {
@@ -97,34 +104,8 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
 
       canvas.toBlob(async (blob) => {
         if (!blob || !activeChatId) return;
-
-        const user = JSON.parse(localStorage.getItem("user") || "null");
-        const senderId = user?.id || user?._id;
-        if (!senderId) return;
-
         const file = new File([blob], "camera.jpg", { type: "image/jpeg" });
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("senderId", senderId);
-        if (isGroup) {
-          formData.append("groupId", activeChatId);
-        } else {
-          formData.append("receiverId", activeChatId);
-        }
-        formData.append("messageType", "image");
-
-        try {
-          const res = await axios.post("/messages/upload", formData, {
-            headers: { "Content-Type": "multipart/form-data" },
-          });
-          const saved = res.data;
-          if (onMediaMessage) {
-            onMediaMessage(saved);
-          }
-        } catch (err) {
-          console.error("Failed to upload camera image", err);
-          toast.error(err.response?.data?.message || "Failed to upload image");
-        }
+        setPendingMedia(file);
       }, "image/jpeg");
     } catch (err) {
       console.error("Camera access error", err);
@@ -393,6 +374,14 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
         <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-red-500 text-white px-4 py-1.5 rounded-full text-xs animate-pulse whitespace-nowrap shadow-lg">
           Recording... Release to send
         </div>
+      )}
+
+      {pendingMedia && (
+        <MediaEditorModal
+          file={pendingMedia}
+          onCancel={() => setPendingMedia(null)}
+          onConfirm={handleMediaConfirm}
+        />
       )}
     </div>
   );
