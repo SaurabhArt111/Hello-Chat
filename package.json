@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "start": "cd backend && npm run start",
+    "dev": "cd backend && npm run dev",
+    "build": "cd frontend && npm install && npm run build"
+  }
+}
