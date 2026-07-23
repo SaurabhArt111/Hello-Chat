@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 import Message from "../models/Message.js";
-import { buildFileUrl } from "../utils/buildFileUrl.js";
 
 // GET /api/shared-media/:currentUserId/:selectedUserId
 export const getSharedMedia = async (req, res) => {
@@ -71,11 +70,11 @@ export const getSharedMedia = async (req, res) => {
       let fileUrl = m.fileUrl || m.file || null;
 
       if (fileUrl && !/^https?:\/\//i.test(fileUrl)) {
-        fileUrl = buildFileUrl(req, fileUrl);
-      } else if (fileUrl && /^http:\/\//i.test(fileUrl)) {
-        // Old messages saved before this fix have http:// baked into the
-        // DB - rewrite on read so they don't get blocked as mixed content.
-        fileUrl = fileUrl.replace(/^http:\/\//i, "https://");
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        if (!fileUrl.startsWith("/")) {
+          fileUrl = `/${fileUrl}`;
+        }
+        fileUrl = `${baseUrl}${fileUrl}`;
       }
 
       return {

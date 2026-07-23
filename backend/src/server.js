@@ -48,22 +48,6 @@ dotenv.config();
 const app = express();
 const httpServer = createServer(app);
 
-// Render (and most PaaS) sit behind a reverse proxy, so req.protocol reports
-// "http" even when the real request came in over https. Trusting the proxy
-// makes req.protocol / req.secure reflect the original scheme, which fixes
-// generated URLs (uploads, avatars, group logos) being saved as http:// and
-// then blocked by the browser as mixed content on an https:// site.
-app.set("trust proxy", 1);
-
-// Connection/disconnection logging is extremely noisy in production (every
-// tab switch / phone lock / flaky mobile network reconnect logs a line) and
-// drowns out real errors. Gate it behind DEBUG_SOCKET_LOGS so it can still
-// be turned on locally or temporarily in prod without a code change.
-const socketLogsEnabled = process.env.DEBUG_SOCKET_LOGS === "true";
-const logSocketEvent = (...args) => {
-  if (socketLogsEnabled) console.log(...args);
-};
-
 /* ---------------- ONLINE USERS MAP ---------------- */
 // For compatibility with existing controllers: map userId -> roomName (same string).
 // Emitting to io.to(onlineUsers[userId]) will broadcast to *all* sockets for that user.
@@ -139,39 +123,6 @@ app.use("/api/scheduled-messages", scheduledMessageRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/reports", reportRoutes);
 
-/* ---------------- HTTPS URL SAFETY NET ---------------- */
-// Old rows saved before the trust-proxy fix have "http://<this-host>/..."
-// baked into the DB (fileUrl, avatar, groupLogo, etc). Rather than track
-// down every response shape that might include one, rewrite them to
-// https:// on the way out, everywhere, so old messages/avatars self-heal
-// without a manual migration.
-app.use((req, res, next) => {
-  const host = req.get("host");
-  if (!host) return next();
-  const httpPrefix = `http://${host}`;
-  const httpsPrefix = `https://${host}`;
-
-  const rewrite = (value) => {
-    if (typeof value === "string") {
-      return value.startsWith(httpPrefix)
-        ? httpsPrefix + value.slice(httpPrefix.length)
-        : value;
-    }
-    if (Array.isArray(value)) return value.map(rewrite);
-    if (value && typeof value === "object") {
-      for (const key of Object.keys(value)) {
-        value[key] = rewrite(value[key]);
-      }
-      return value;
-    }
-    return value;
-  };
-
-  const originalJson = res.json.bind(res);
-  res.json = (body) => originalJson(rewrite(body));
-  next();
-});
-
 /* ---------------- ROOT ---------------- */
 app.get("/", (req, res) => {
   res.send("API running...");
@@ -179,7 +130,7 @@ app.get("/", (req, res) => {
 
 /* ---------------- SOCKET LOGIC ---------------- */
 io.on("connection", (socket) => {
-  logSocketEvent("User connected:", socket.id);
+  console.log("User connected:", socket.id);
 
   const getOnlineList = () => Object.keys(onlineUsers);
 
@@ -848,7 +799,7 @@ io.on("connection", (socket) => {
     io.emit("onlineUsers", list);
     io.emit("online_users", list);
 
-    logSocketEvent("User disconnected:", socket.id);
+    console.log("User disconnected:", socket.id);
   });
 });
 
