@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Message from "../models/Message.js";
 import FriendRequest from "../models/FriendRequest.js";
 import { maybeCompressImageFile } from "../utils/fileStorage.js";
+import { buildFileUrl } from "../utils/buildFileUrl.js";
 
 // POST /api/messages/upload
 export const uploadFile = async (req, res) => {
@@ -71,9 +72,8 @@ export const uploadFile = async (req, res) => {
       if (compressedName) finalFilename = compressedName;
     }
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
     const relativePath = `/uploads/${finalFilename}`;
-    const fileUrl = `${baseUrl}${relativePath}`;
+    const fileUrl = buildFileUrl(req, relativePath);
     const fileName = req.file.originalname;
     const fileSize = `${Math.round(req.file.size / 1024)} KB`;
 

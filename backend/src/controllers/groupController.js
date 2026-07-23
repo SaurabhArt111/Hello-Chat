@@ -4,6 +4,7 @@ import User from "../models/User.js";
 import Message from "../models/Message.js";
 import FriendRequest from "../models/FriendRequest.js";
 import { maybeCompressImageFile, deleteLocalUpload } from "../utils/fileStorage.js";
+import { buildFileUrl } from "../utils/buildFileUrl.js";
 
 /* HELPER: Check if user is admin */
 const isAdmin = (group, userId) => {
@@ -336,13 +337,12 @@ export const uploadGroupLogo = async (req, res) => {
       return res.status(403).json({ message: "Only admins can change group logo" });
     }
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
     let finalFilename = req.file.filename;
     const compressedName = await maybeCompressImageFile(req.file.path, req.file.mimetype);
     if (compressedName) finalFilename = compressedName;
 
     const relativePath = `/uploads/groups/${finalFilename}`;
-    const logoUrl = `${baseUrl}${relativePath}`;
+    const logoUrl = buildFileUrl(req, relativePath);
 
     const previousLogo = group.groupLogo;
     group.groupLogo = logoUrl;
