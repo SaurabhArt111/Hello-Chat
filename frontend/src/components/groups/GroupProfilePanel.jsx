@@ -14,6 +14,8 @@ import {
 import { getFriends } from "../../api/friends";
 import { useToastContext } from "../../context/ToastContext";
 import axios from "../../api/axios";
+import { compressFileForUpload, FileTooLargeError } from "../../utils/compressFile";
+import { FiCheck } from "react-icons/fi";
 
 const GroupProfilePanel = ({ groupId, onClose, onGroupUpdated, onGroupDisbanded }) => {
   const [group, setGroup] = useState(null);
@@ -70,11 +72,21 @@ const GroupProfilePanel = ({ groupId, onClose, onGroupUpdated, onGroupDisbanded 
     );
   };
 
-  const handleLogoChange = (e) => {
+  const handleLogoChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setLogoFile(file);
-      setLogoPreview(URL.createObjectURL(file));
+    if (!file) return;
+    try {
+      const compressed = await compressFileForUpload(file);
+      setLogoFile(compressed);
+      setLogoPreview(URL.createObjectURL(compressed));
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        toast.error(err.message);
+      } else {
+        console.error("Logo compression failed:", err);
+        setLogoFile(file);
+        setLogoPreview(URL.createObjectURL(file));
+      }
     }
   };
 
@@ -368,7 +380,7 @@ const GroupProfilePanel = ({ groupId, onClose, onGroupUpdated, onGroupDisbanded 
                       {friend.username}
                     </span>
                     {selectedFriends.includes(friend._id) && (
-                      <span className="text-emerald-500">✓</span>
+                      <span className="text-emerald-500"><FiCheck size={16} /></span>
                     )}
                   </button>
                 ))

@@ -7,6 +7,7 @@ import React, {
 import socket from "../socket";
 import axios from "../api/axios";
 import { Toaster, toast } from "react-hot-toast";
+import { requestNotificationPermission, showBackgroundNotification } from "../utils/browserNotifications";
 
 const NotificationContext = createContext(null);
 
@@ -56,6 +57,12 @@ export const NotificationProvider = ({ children }) => {
     };
 
     fetchNotifications();
+
+    // Ask for OS/browser notification permission once a user is logged in.
+    // Without this, `Notification.permission` stays "default" forever and
+    // every downstream notification (calls, messages) silently no-ops -
+    // this was previously never requested anywhere in the app.
+    requestNotificationPermission();
   }, []);
 
   // Socket listener for real-time friend requests
@@ -120,6 +127,41 @@ export const NotificationProvider = ({ children }) => {
     socket.on("notification_created", handler);
     return () => {
       socket.off("notification_created", handler);
+    };
+  }, [notificationsEnabled]);
+
+  // Background OS notification for incoming chat messages. This is
+  // separate from the message-rendering logic in Home.jsx (which stays
+  // untouched) - purely fires a notification when the tab isn't focused,
+  // for both 1:1 and group messages.
+  useEffect(() => {
+    if (!notificationsEnabled) return undefined;
+
+    const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+    const myUserId = storedUser?.id || storedUser?._id;
+
+    const notifyIncoming = (data) => {
+      const senderId = data?.senderId || data?.message?.sender;
+      if (!senderId || String(senderId) === String(myUserId)) return; // ignore my own messages
+
+      const senderName = data?.senderName || data?.message?.senderName || "New message";
+      const preview =
+        data?.text ||
+        data?.message?.text ||
+        (data?.messageType === "voice" || data?.message?.messageType === "voice"
+          ? "🎤 Voice message"
+          : data?.messageType || data?.message?.messageType
+          ? "Sent an attachment"
+          : "New message");
+
+      showBackgroundNotification(senderName, { body: preview, tag: `chat-${senderId}` });
+    };
+
+    socket.on("new_message", notifyIncoming);
+    socket.on("receiveMessage", notifyIncoming);
+    return () => {
+      socket.off("new_message", notifyIncoming);
+      socket.off("receiveMessage", notifyIncoming);
     };
   }, [notificationsEnabled]);
 

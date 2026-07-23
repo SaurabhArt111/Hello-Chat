@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import MessageActionsMenu from "./MessageActionsMenu";
 import ReactionPicker from "./ReactionPicker";
 import { Clock } from "lucide-react";
+import { FiFile, FiCheck } from "react-icons/fi";
 
 const urlRegex = /(https?:\/\/\S+)/gi;
 
@@ -261,7 +262,7 @@ const MessageBubble = ({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  📄 {text || "Download File"}
+                  <FiFile className="inline mr-1" /> {text || "Download File"}
                 </a>
               )}
             </>
@@ -279,9 +280,13 @@ const MessageBubble = ({
                   className={status === "seen" ? "text-blue-300" : "opacity-90"}
                   title={status === "seen" && seenAt ? `Seen at ${new Date(seenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : undefined}
                 >
-                  {status === "sent" && "✓"}
-                  {status === "delivered" && "✓✓"}
-                  {status === "seen" && "✓✓"}
+                  {status === "sent" && <FiCheck size={13} className="inline" />}
+                  {(status === "delivered" || status === "seen") && (
+                    <span className="inline-flex -space-x-2">
+                      <FiCheck size={13} />
+                      <FiCheck size={13} />
+                    </span>
+                  )}
                 </span>
               )}
             </div>

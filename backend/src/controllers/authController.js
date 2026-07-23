@@ -1,7 +1,7 @@
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import cloudinary from "../utils/cloudinary.js";
+import { saveAvatarBuffer } from "../utils/fileStorage.js";
 
 /* =========================
    REGISTER
@@ -26,13 +26,9 @@ export const registerUser = async (req, res) => {
 
     let avatarUrl = "";
 
-    // Upload avatar to Cloudinary
+    // Save avatar locally (compressed) instead of uploading to Cloudinary
     if (req.file) {
-      const uploadRes = await cloudinary.uploader.upload(
-        `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
-        { folder: "avatars" }
-      );
-      avatarUrl = uploadRes.secure_url;
+      avatarUrl = await saveAvatarBuffer(req.file.buffer, req.file.mimetype);
     }
 
     // Create user (regular user by default)

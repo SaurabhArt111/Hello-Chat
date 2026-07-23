@@ -10,6 +10,7 @@ import {
 import axios from "../../api/axios";
 import { useNotificationContext } from "../../context/NotificationContext";
 import { toast } from "react-hot-toast";
+import { FiX } from "react-icons/fi";
 
 const RequestsPanel = ({ onClose }) => {
   const [requests, setRequests] = useState([]);
@@ -131,7 +132,7 @@ const RequestsPanel = ({ onClose }) => {
             onClick={onClose}
             className="absolute top-4 right-4 p-1.5 rounded-xl text-gray-400 dark:text-neutral-400 hover:text-gray-900 dark:hover:text-neutral-100 hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors"
           >
-            ✕
+            <FiX size={18} />
           </button>
 
           <h2 className="text-xl font-bold text-gray-900 dark:text-neutral-100">Notification</h2>

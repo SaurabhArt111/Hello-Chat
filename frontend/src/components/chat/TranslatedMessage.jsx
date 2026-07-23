@@ -1,10 +1,7 @@
 import React, { useState } from "react";
 import MessageActionsMenu from "./MessageActionsMenu";
 import ReactionPicker from "./ReactionPicker";
-
-const urlRegex = /(https?:\/\/\S+)/gi;
-
-const renderTextWithLinks = (text) => {
+import { FiFile, FiCheck } from "react-icons/fi"; = (text) => {
   if (!text) return null;
   const parts = text.split(urlRegex);
   return (
@@ -141,7 +138,7 @@ export default function TranslatedMessage({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  📄 {text || "Download File"}
+                  <FiFile className="inline mr-1" /> {text || "Download File"}
                 </a>
               )}
             </>
@@ -175,9 +172,13 @@ export default function TranslatedMessage({
                     ${status === "seen" ? "text-blue-400" : "text-white/80"}
                   `}
                 >
-                  {status === "sent" && "✓"}
-                  {status === "delivered" && "✓✓"}
-                  {status === "seen" && "✓✓"}
+                  {status === "sent" && <FiCheck size={13} className="inline" />}
+                  {(status === "delivered" || status === "seen") && (
+                    <span className="inline-flex -space-x-2">
+                      <FiCheck size={13} />
+                      <FiCheck size={13} />
+                    </span>
+                  )}
                 </span>
               )}
             </div>

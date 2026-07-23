@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "../../api/axios";
 import socket from "../../socket";
+import { FiFile, FiLink } from "react-icons/fi";
 
 const TABS = [
   { id: "media", label: "Media" },
@@ -223,7 +224,7 @@ const SharedMedia = ({ currentUserId, selectedUserId }) => {
                 className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-neutral-700/80 border border-gray-200 dark:border-neutral-600 hover:bg-gray-100 dark:hover:bg-neutral-700 hover:border-gray-300 dark:hover:border-neutral-500 transition-colors"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">📄</span>
+                  <span className="text-lg"><FiFile /></span>
                   <div>
                     <p className="text-xs font-medium text-gray-900 dark:text-neutral-100 truncate max-w-[160px]">
                       {item.fileName || "Document"}
@@ -257,7 +258,7 @@ const SharedMedia = ({ currentUserId, selectedUserId }) => {
                   className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-neutral-700/80 border border-gray-200 dark:border-neutral-600 hover:bg-gray-100 dark:hover:bg-neutral-700 hover:border-gray-300 dark:hover:border-neutral-500 transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">🔗</span>
+                    <span className="text-lg"><FiLink /></span>
                     <p className="text-xs font-medium text-blue-600 dark:text-blue-400 truncate max-w-[200px]">
                       {url}
                     </p>

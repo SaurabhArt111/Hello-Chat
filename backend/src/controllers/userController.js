@@ -1,5 +1,5 @@
 import User from "../models/User.js";
-import cloudinary from "../utils/cloudinary.js";
+import { saveAvatarBuffer, deleteLocalUpload } from "../utils/fileStorage.js";
 import Friend from "../models/Friend.js";
 import FriendRequest from "../models/FriendRequest.js";
 import BlockedUser from "../models/BlockedUser.js";
@@ -21,14 +21,13 @@ export const updateProfile = async (req, res) => {
     const { id, username, email, bio, preferredLanguage } = req.body;
 
     let avatarUrl = req.body.avatar;
+    let previousAvatar = null;
 
-    // If new avatar uploaded
+    // If new avatar uploaded, compress + save it locally instead of Cloudinary
     if (req.file) {
-      const uploadRes = await cloudinary.uploader.upload(
-        `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`,
-        { folder: "avatars" }
-      );
-      avatarUrl = uploadRes.secure_url;
+      const existing = await User.findById(id).select("avatar").lean();
+      previousAvatar = existing?.avatar || null;
+      avatarUrl = await saveAvatarBuffer(req.file.buffer, req.file.mimetype);
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -45,6 +44,12 @@ export const updateProfile = async (req, res) => {
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    // Remove the old avatar file now that the new one is saved & referenced,
+    // so uploads/avatars doesn't accumulate orphaned files over time.
+    if (previousAvatar && previousAvatar !== avatarUrl) {
+      deleteLocalUpload(previousAvatar);
     }
 
     // Keep response shape consistent with login (id instead of _id)
@@ -413,19 +418,6 @@ export const getContacts = async (req, res) => {
 };
 
 /* PERMANENTLY DELETE MY ACCOUNT */
-const extractCloudinaryPublicId = (url) => {
-  if (!url || typeof url !== "string") return null;
-  try {
-    const uploadIndex = url.indexOf("/upload/");
-    if (uploadIndex === -1) return null;
-    let path = url.substring(uploadIndex + "/upload/".length);
-    path = path.replace(/^v[0-9]+\/+/, "");
-    const withoutExt = path.replace(/\.[^/.]+$/, "");
-    return withoutExt || null;
-  } catch {
-    return null;
-  }
-};
 
 export const deleteMyAccount = async (req, res) => {
   const userId = req.user;
@@ -514,12 +506,9 @@ export const deleteMyAccount = async (req, res) => {
 
     if (avatarUrl) {
       try {
-        const publicId = extractCloudinaryPublicId(avatarUrl);
-        if (publicId) {
-          await cloudinary.uploader.destroy(publicId);
-        }
-      } catch (cloudErr) {
-        console.error("Error deleting avatar from Cloudinary:", cloudErr);
+        deleteLocalUpload(avatarUrl);
+      } catch (fileErr) {
+        console.error("Error deleting local avatar file:", fileErr);
       }
     }
 

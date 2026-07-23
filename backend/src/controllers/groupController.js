@@ -3,6 +3,7 @@ import Group from "../models/Group.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
 import FriendRequest from "../models/FriendRequest.js";
+import { maybeCompressImageFile, deleteLocalUpload } from "../utils/fileStorage.js";
 
 /* HELPER: Check if user is admin */
 const isAdmin = (group, userId) => {
@@ -336,11 +337,19 @@ export const uploadGroupLogo = async (req, res) => {
     }
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const relativePath = `/uploads/groups/${req.file.filename}`;
+    let finalFilename = req.file.filename;
+    const compressedName = await maybeCompressImageFile(req.file.path, req.file.mimetype);
+    if (compressedName) finalFilename = compressedName;
+
+    const relativePath = `/uploads/groups/${finalFilename}`;
     const logoUrl = `${baseUrl}${relativePath}`;
 
+    const previousLogo = group.groupLogo;
     group.groupLogo = logoUrl;
     await group.save();
+    if (previousLogo && previousLogo !== logoUrl) {
+      deleteLocalUpload(previousLogo);
+    }
     await group.populate("members.user", "username avatar email");
     await group.populate("createdBy", "username avatar");
 

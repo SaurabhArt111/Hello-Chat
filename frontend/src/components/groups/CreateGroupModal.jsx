@@ -5,6 +5,7 @@ import { createGroup } from "../../api/groups";
 import { useToastContext } from "../../context/ToastContext";
 import Avatar from "../common/Avatar";
 import axios from "../../api/axios";
+import { FiCheck } from "react-icons/fi";
 
 const CreateGroupModal = ({ isOpen, onClose, friends, onGroupCreated }) => {
   const [name, setName] = useState("");
@@ -179,7 +180,7 @@ const CreateGroupModal = ({ isOpen, onClose, friends, onGroupCreated }) => {
                       </span>
                       {selectedMembers.includes(friend._id) && (
                         <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
-                          <span className="text-white text-xs">✓</span>
+                          <FiCheck size={12} className="text-white" />
                         </div>
                       )}
                     </button>

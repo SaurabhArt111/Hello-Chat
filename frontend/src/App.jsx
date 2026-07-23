@@ -21,6 +21,7 @@ const AdminReports = React.lazy(() => import("./pages/admin/AdminReports"));
 // Lazy-loaded call overlays — rarely needed on initial load
 const IncomingCallModal = React.lazy(() => import("./components/call/IncomingCallModal"));
 const CallScreen = React.lazy(() => import("./components/call/CallScreen"));
+const PWAInstallPrompt = React.lazy(() => import("./components/pwa/PWAInstallPrompt"));
 
 /* Full-screen loading spinner shown while lazy chunks download */
 const PageLoader = () => (
@@ -77,6 +78,7 @@ function App() {
                 <Suspense fallback={null}>
                   <IncomingCallModal />
                   <CallScreen />
+                  <PWAInstallPrompt />
                 </Suspense>
               </CallProvider>
             </TranslationProvider>

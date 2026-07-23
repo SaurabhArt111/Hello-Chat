@@ -7,6 +7,8 @@ import SharedMedia from "./SharedMedia";
 import axios from "../../api/axios";
 import { useLanguage } from "../../context/LanguageContext";
 import { X } from "lucide-react";
+import { FiEdit2 } from "react-icons/fi";
+import { compressFileForUpload, FileTooLargeError } from "../../utils/compressFile";
 
 const ProfilePanel = ({
   onClose,
@@ -74,12 +76,17 @@ const ProfilePanel = ({
   }, [viewingOther, selectedUserId]);
 
   useEffect(() => {
-    if (viewingOther || !user || !preferredLanguage || editing) return;
-    setUser((prev) => ({
-      ...prev,
-      preferredLanguage: preferredLanguage,
-    }));
-  }, [preferredLanguage, viewingOther, editing, user]);
+    if (viewingOther || !preferredLanguage || editing) return;
+    // Functional update + a same-reference bail-out when nothing actually
+    // changed. The previous version depended on `user` while also calling
+    // setUser(), which produced a new object every render and re-triggered
+    // this same effect indefinitely ("Maximum update depth exceeded").
+    setUser((prev) => {
+      if (!prev) return prev;
+      if (prev.preferredLanguage === preferredLanguage) return prev;
+      return { ...prev, preferredLanguage };
+    });
+  }, [preferredLanguage, viewingOther, editing]);
 
   useEffect(() => {
     if (!viewingOther || !selectedUserId) return;
@@ -90,11 +97,21 @@ const ProfilePanel = ({
 
   if (!user) return null;
 
-  const handleAvatarChange = (e) => {
+  const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setAvatarFile(file);
-      setAvatarPreview(URL.createObjectURL(file));
+    if (!file) return;
+    try {
+      const compressed = await compressFileForUpload(file);
+      setAvatarFile(compressed);
+      setAvatarPreview(URL.createObjectURL(compressed));
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        alert(err.message);
+      } else {
+        console.error("Avatar compression failed:", err);
+        setAvatarFile(file);
+        setAvatarPreview(URL.createObjectURL(file));
+      }
     }
   };
 
@@ -158,7 +175,7 @@ const ProfilePanel = ({
             onClick={() => setEditing(!editing)}
             className="absolute top-3 left-3"
           >
-            ✏️
+            <FiEdit2 size={16} />
           </button>
         )}
 

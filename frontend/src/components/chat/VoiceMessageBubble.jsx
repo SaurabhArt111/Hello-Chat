@@ -1,4 +1,14 @@
 import React, { useRef, useState, useEffect } from "react";
+import { FiPlay, FiPause } from "react-icons/fi";
+
+// Simple pub/sub so starting one voice note pauses any other one that's
+// currently playing, instead of letting multiple play on top of each other.
+const activePlayers = new Set();
+function pauseOtherPlayers(except) {
+  for (const pause of activePlayers) {
+    if (pause !== except) pause();
+  }
+}
 
 const VoiceMessageBubble = ({
   audioUrl,
@@ -21,10 +31,45 @@ const VoiceMessageBubble = ({
     if (!audioRef.current) return;
     if (playing) {
       audioRef.current.pause();
+      setPlaying(false);
     } else {
-      audioRef.current.play();
+      pauseOtherPlayers(pauseThis);
+      const playPromise = audioRef.current.play();
+      if (playPromise?.catch) {
+        playPromise
+          .then(() => setPlaying(true))
+          .catch((err) => {
+            console.error("Voice note playback failed:", err);
+            setPlaying(false);
+          });
+      } else {
+        setPlaying(true);
+      }
     }
-    setPlaying(!playing);
+  };
+
+  const pauseThis = () => {
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+    }
+    setPlaying(false);
+  };
+
+  useEffect(() => {
+    activePlayers.add(pauseThis);
+    return () => activePlayers.delete(pauseThis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSeek = (e) => {
+    const el = audioRef.current;
+    if (!el || !el.duration || isNaN(el.duration)) return;
+    const bar = e.currentTarget;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    el.currentTime = ratio * el.duration;
+    setProgress(ratio * 100);
+    setCurrentTime(el.currentTime);
   };
 
   useEffect(() => {
@@ -80,13 +125,21 @@ const VoiceMessageBubble = ({
             aria-label={playing ? "Pause" : "Play"}
           >
             {playing ? (
-              <span className="text-lg">⏸</span>
+              <FiPause size={18} />
             ) : (
-              <span className="text-lg ml-0.5">▶</span>
+              <FiPlay size={18} className="ml-0.5" />
             )}
           </button>
           <div className="flex-1 min-w-0">
-            <div className="h-1.5 bg-black/20 rounded-full overflow-hidden">
+            <div
+              className="h-1.5 bg-black/20 rounded-full overflow-hidden cursor-pointer"
+              onClick={handleSeek}
+              role="slider"
+              aria-label="Seek"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(progress)}
+            >
               <div
                 className="h-full bg-white/90 rounded-full transition-all duration-150"
                 style={{ width: `${progress}%` }}

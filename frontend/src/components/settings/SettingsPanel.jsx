@@ -7,6 +7,7 @@ import LanguageSelector from "./LanguageSelector";
 import LastSeenPrivacy from "./LastSeenPrivacy";
 import ProfilePhotoPrivacy from "./ProfilePhotoPrivacy";
 import DeleteAccountModal from "./DeleteAccountModal";
+import { FiX } from "react-icons/fi";
 
 const SettingsPanel = ({ onClose }) => {
   const navigate = useNavigate();
@@ -28,7 +29,7 @@ const SettingsPanel = ({ onClose }) => {
             onClick={onClose}
             className="absolute top-4 right-4 p-1.5 rounded-xl text-gray-400 dark:text-neutral-400 hover:text-gray-900 dark:hover:text-neutral-100 hover:bg-gray-100 dark:hover:bg-neutral-700 transition-colors"
           >
-            ✕
+            <FiX size={18} />
           </button>
 
           <h2 className="text-xl font-bold text-gray-900 dark:text-neutral-100">Settings</h2>

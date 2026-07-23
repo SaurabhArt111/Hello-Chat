@@ -14,7 +14,46 @@ const CallContext = createContext(null);
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
+  // Add a TURN server for calls to work reliably across restrictive
+  // networks (mobile data / corporate NAT / symmetric NAT). STUN alone
+  // (above) only helps on "easy" networks; without TURN, calls between
+  // two such networks will simply fail to connect. Set these in your
+  // frontend .env (VITE_TURN_URL / VITE_TURN_USERNAME / VITE_TURN_CREDENTIAL)
+  // using a provider like Twilio NTS, Xirsys, Metered, or your own coturn.
+  ...(import.meta.env.VITE_TURN_URL
+    ? [
+        {
+          urls: import.meta.env.VITE_TURN_URL,
+          username: import.meta.env.VITE_TURN_USERNAME,
+          credential: import.meta.env.VITE_TURN_CREDENTIAL,
+        },
+      ]
+    : []),
 ];
+
+const getUserMedia = async (constraints) => {
+  if (typeof navigator === "undefined") {
+    throw new Error("navigator is not available");
+  }
+
+  if (navigator.mediaDevices?.getUserMedia) {
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  }
+
+  const legacyGetUserMedia =
+    navigator.getUserMedia ||
+    navigator.webkitGetUserMedia ||
+    navigator.mozGetUserMedia ||
+    navigator.msGetUserMedia;
+
+  if (!legacyGetUserMedia) {
+    throw new Error("getUserMedia is not supported in this browser");
+  }
+
+  return await new Promise((resolve, reject) => {
+    legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+  });
+};
 
 export function CallProvider({ children }) {
   const [callState, setCallState] = useState("idle"); // idle | calling | incoming | connected
@@ -117,13 +156,19 @@ export function CallProvider({ children }) {
       };
 
       pc.onconnectionstatechange = () => {
-        if (
-          pc.connectionState === "failed" ||
-          pc.connectionState === "disconnected" ||
-          pc.connectionState === "closed"
-        ) {
+        if (pc.connectionState === "failed") {
+          // "failed" can often be recovered from with an ICE restart
+          // (e.g. after a brief network blip or wifi/cellular handoff on
+          // mobile) instead of dropping the whole call immediately.
+          pc.restartIce?.();
+        } else if (pc.connectionState === "closed") {
           cleanup();
         }
+        // Note: "disconnected" is intentionally NOT treated as a hangup.
+        // It's often transient (packet loss, brief network switch) and
+        // usually self-recovers to "connected"; ending the call here was
+        // causing calls to drop on ordinary network hiccups, especially
+        // on mobile.
       };
 
       peerConnectionRef.current = pc;
@@ -177,7 +222,7 @@ export function CallProvider({ children }) {
                 },
               }
             : { audio: true, video: false };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await getUserMedia(constraints);
         localStreamRef.current = stream;
         setLocalStream(stream);
       } catch (err) {
@@ -206,8 +251,6 @@ export function CallProvider({ children }) {
 
     setCallType(caller.callType || "audio");
     setRemoteUser({ id: caller.callerId, name: caller.callerName || "User" });
-    setCallState("connected");
-    callConnectedAtRef.current = Date.now();
     if (caller.callId) {
       currentCallIdRef.current = caller.callId;
     }
@@ -225,7 +268,7 @@ export function CallProvider({ children }) {
               },
             }
           : { audio: true, video: false };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await getUserMedia(constraints);
       localStreamRef.current = stream;
       setLocalStream(stream);
     } catch (err) {
@@ -234,13 +277,15 @@ export function CallProvider({ children }) {
       return;
     }
 
+    createPeerConnection(false);
+    setCallState("connected");
+    callConnectedAtRef.current = Date.now();
+
     socket.emit("accept_call", {
       callerId: caller.callerId,
       receiverId: userId,
       callId: caller.callId,
     });
-
-    createPeerConnection(false);
   }, [getUserId, incomingCaller, createPeerConnection, cleanup]);
 
   const rejectCall = useCallback(() => {

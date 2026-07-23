@@ -1,11 +1,12 @@
 import mongoose from "mongoose";
 import Message from "../models/Message.js";
 import FriendRequest from "../models/FriendRequest.js";
+import { maybeCompressImageFile } from "../utils/fileStorage.js";
 
 // POST /api/messages/upload
 export const uploadFile = async (req, res) => {
   try {
-    const { senderId, receiverId, groupId, messageType } = req.body;
+    const { senderId, receiverId, groupId, messageType, duration } = req.body;
 
     if (!senderId || !req.file) {
       return res
@@ -54,9 +55,24 @@ export const uploadFile = async (req, res) => {
     let type = "file";
     if (messageType === "image") type = "image";
     else if (messageType === "video") type = "video";
+    else if (messageType === "voice") type = "voice";
+
+    // The client already compresses images/video before upload (see
+    // frontend/src/utils/compressFile.js). This is a server-side safety net
+    // in case the client is old/bypassed: images get re-compressed here too.
+    // PDFs, audio, and video are left as-is (video re-encoding needs a real
+    // media pipeline and is out of scope for a lightweight Node backend).
+    let finalFilename = req.file.filename;
+    if (type === "image") {
+      const compressedName = await maybeCompressImageFile(
+        req.file.path,
+        req.file.mimetype
+      );
+      if (compressedName) finalFilename = compressedName;
+    }
 
     const baseUrl = `${req.protocol}://${req.get("host")}`;
-    const relativePath = `/uploads/${req.file.filename}`;
+    const relativePath = `/uploads/${finalFilename}`;
     const fileUrl = `${baseUrl}${relativePath}`;
     const fileName = req.file.originalname;
     const fileSize = `${Math.round(req.file.size / 1024)} KB`;
@@ -70,6 +86,7 @@ export const uploadFile = async (req, res) => {
       fileUrl,
       fileName,
       fileSize,
+      duration: duration ? Number(duration) : undefined,
       text: "",
     });
 
@@ -102,6 +119,7 @@ export const uploadFile = async (req, res) => {
             fileUrl: savedMessage.fileUrl,
             fileName: savedMessage.fileName,
             fileSize: savedMessage.fileSize,
+            duration: savedMessage.duration,
             text: savedMessage.text || "",
             createdAt: savedMessage.createdAt,
           };

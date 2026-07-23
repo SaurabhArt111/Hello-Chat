@@ -30,6 +30,8 @@ const messageSchema = new mongoose.Schema(
     fileUrl: String,
     fileName: String,
     fileSize: String,
+    // Duration in seconds, used by voice-note playback (messageType: "voice")
+    duration: Number,
     status: {
       type: String,
       // NOTE: We extend this enum to support server-side scheduling.

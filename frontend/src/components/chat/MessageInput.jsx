@@ -3,6 +3,8 @@ import { Clock } from "lucide-react";
 import socket from "../../socket";
 import axios from "../../api/axios";
 import { useToastContext } from "../../context/ToastContext";
+import { compressFileForUpload, FileTooLargeError } from "../../utils/compressFile";
+import { FiPaperclip, FiImage, FiVideo, FiFile, FiCamera, FiMic } from "react-icons/fi";
 
 const TYPING_IDLE_MS = 1000;
 
@@ -13,6 +15,7 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
   const typingTimeoutRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const recordingStartRef = useRef(null);
   const [showMenu, setShowMenu] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
@@ -25,12 +28,24 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
   };
 
   const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeChatId) return;
+    const rawFile = e.target.files?.[0];
+    if (!rawFile || !activeChatId) return;
 
     const user = JSON.parse(localStorage.getItem("user") || "null");
     const senderId = user?.id || user?._id;
     if (!senderId) return;
+
+    let file = rawFile;
+    try {
+      file = await compressFileForUpload(rawFile);
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        toast.error(err.message);
+        e.target.value = "";
+        return;
+      }
+      console.error("Compression failed, sending original file:", err);
+    }
 
     let messageType = "file";
     if (file.type.startsWith("image/")) messageType = "image";
@@ -135,6 +150,7 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
       const options = mimeType ? { mimeType } : {};
       const recorder = new MediaRecorder(stream, options);
       chunksRef.current = [];
+      recordingStartRef.current = Date.now();
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
@@ -144,6 +160,9 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
           setIsRecording(false);
           return;
         }
+        const durationSec = recordingStartRef.current
+          ? Math.round((Date.now() - recordingStartRef.current) / 1000)
+          : 0;
         const isMp4 = mimeType.startsWith("audio/mp4");
         const blobType = isMp4 ? "audio/mp4" : "audio/webm";
         const blob = new Blob(chunksRef.current, { type: blobType });
@@ -164,6 +183,7 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
           formData.append("receiverId", activeChatId);
         }
         formData.append("messageType", "voice");
+        formData.append("duration", String(durationSec));
         try {
           const res = await axios.post("/messages/upload", formData, {
             headers: { "Content-Type": "multipart/form-data" },
@@ -258,12 +278,12 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
         onChange={handleFileChange}
       />
 
-      {/* 📎 Attachment Button */}
+      {/* Attachment Button */}
       <button
         onClick={() => setShowMenu(!showMenu)}
-        className="text-gray-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 text-xl p-2 hover:bg-gray-100 dark:hover:bg-neutral-700 rounded-xl transition-all duration-200 min-w-[40px] min-h-[40px]"
+        className="text-gray-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 p-2 hover:bg-gray-100 dark:hover:bg-neutral-700 rounded-xl transition-all duration-200 min-w-[40px] min-h-[40px] flex items-center justify-center"
       >
-        📎
+        <FiPaperclip size={20} />
       </button>
 
       {/* Attachment Menu */}
@@ -273,38 +293,38 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
           className="absolute bottom-16 left-2 bg-white dark:bg-neutral-800 backdrop-blur-md shadow-2xl rounded-2xl p-4 grid grid-cols-2 gap-3 w-52 border border-gray-200 dark:border-neutral-700"
         >
           <div onClick={openFilePicker} className="flex flex-col items-center cursor-pointer p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors group">
-            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center text-xl group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600">🖼️</div>
+            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600"><FiImage size={20} /></div>
             <span className="text-xs mt-2 text-gray-700 dark:text-neutral-300 font-medium">Image</span>
           </div>
 
           <div onClick={openFilePicker} className="flex flex-col items-center cursor-pointer p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors group">
-            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center text-xl group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600">🎥</div>
+            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600"><FiVideo size={20} /></div>
             <span className="text-xs mt-2 text-gray-700 dark:text-neutral-300 font-medium">Video</span>
           </div>
 
           <div onClick={openFilePicker} className="flex flex-col items-center cursor-pointer p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors group">
-            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center text-xl group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600">📄</div>
+            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600"><FiFile size={20} /></div>
             <span className="text-xs mt-2 text-gray-700 dark:text-neutral-300 font-medium">Document</span>
           </div>
 
           <div onClick={handleCameraCapture} className="flex flex-col items-center cursor-pointer p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-neutral-700 transition-colors group">
-            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center text-xl group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600">📷</div>
+            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-neutral-700 flex items-center justify-center group-hover:scale-110 transition-transform border border-gray-300 dark:border-neutral-600"><FiCamera size={20} /></div>
             <span className="text-xs mt-2 text-gray-700 dark:text-neutral-300 font-medium">Camera</span>
           </div>
         </div>
       )}
 
-      {/* 🎤 Voice Button - hold to record */}
+      {/* Voice Button - hold to record */}
       <button
         type="button"
         onMouseDown={startVoiceRecording}
         onTouchStart={(e) => { e.preventDefault(); startVoiceRecording(); }}
-        className={`text-xl p-2 rounded-xl transition-all duration-200 select-none min-w-[40px] min-h-[40px] ${isRecording
+        className={`p-2 rounded-xl transition-all duration-200 select-none min-w-[40px] min-h-[40px] flex items-center justify-center ${isRecording
           ? "text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/20 animate-pulse"
           : "text-gray-500 dark:text-neutral-400 hover:text-emerald-500 dark:hover:text-emerald-400 hover:bg-gray-100 dark:hover:bg-neutral-700"}`}
         title="Hold to record voice message"
       >
-        🎤
+        <FiMic size={20} />
       </button>
 
       {/* TEXT INPUT */}

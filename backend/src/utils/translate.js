@@ -19,8 +19,13 @@ const CODE_ALIASES = {
   German: "de",
 };
 
-const LIBRETRANSLATE_URL =
-  process.env.LIBRETRANSLATE_URL || "https://libretranslate.com/translate";
+// Only use LibreTranslate if the operator has explicitly pointed this at a
+// real instance (self-hosted, or a paid libretranslate.com key). The public
+// https://libretranslate.com/translate endpoint rejects unauthenticated
+// requests with a 400, so defaulting to it just produces a failed request +
+// console spam on every single translation before falling back to Google.
+const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL || null;
+const LIBRETRANSLATE_ENABLED = Boolean(LIBRETRANSLATE_URL);
 
 function normalizeTargetCode(targetLanguage) {
   return CODE_ALIASES[targetLanguage] || targetLanguage || "en";
@@ -81,11 +86,14 @@ async function translateWithGoogle(text, targetCode) {
 export async function translateTo(text, targetLanguage) {
   const targetCode = normalizeTargetCode(targetLanguage);
 
-  // Try LibreTranslate first (usually more reliable than unofficial Google)
-  try {
-    return await translateWithLibreTranslate(text, targetCode);
-  } catch (libreErr) {
-    console.warn("LibreTranslate failed:", libreErr.message);
+  // Try LibreTranslate first (usually more reliable than unofficial Google),
+  // but only if a real instance/key has been configured.
+  if (LIBRETRANSLATE_ENABLED) {
+    try {
+      return await translateWithLibreTranslate(text, targetCode);
+    } catch (libreErr) {
+      console.warn("LibreTranslate failed:", libreErr.message);
+    }
   }
 
   // Fallback to Google

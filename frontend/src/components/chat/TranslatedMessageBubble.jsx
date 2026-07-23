@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import MessageActionsMenu from "./MessageActionsMenu";
 import ReactionPicker from "./ReactionPicker";
 import { useTranslation } from "../../context/TranslationContext";
+import { FiFile } from "react-icons/fi";
 
 const urlRegex = /(https?:\/\/\S+)/gi;
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -205,7 +206,7 @@ export default function TranslatedMessageBubble({
                   target="_blank"
                   rel="noreferrer"
                 >
-                  📄 {message.text || "Download File"}
+                  <FiFile className="inline mr-1" /> {message.text || "Download File"}
                 </a>
               )}
             </>

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { loginUser, registerUser } from "../api/auth";
 import { useEffect } from "react";
 import { useToastContext } from "../context/ToastContext";
+import { compressFileForUpload, FileTooLargeError } from "../utils/compressFile";
 
 
 const Auth = () => {
@@ -21,11 +22,21 @@ const Auth = () => {
   const toast = useToastContext();
 
   /* HANDLE AVATAR */
-  const handleAvatarChange = (e) => {
+  const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setAvatarFile(file);
-      setAvatarPreview(URL.createObjectURL(file));
+    if (!file) return;
+    try {
+      const compressed = await compressFileForUpload(file);
+      setAvatarFile(compressed);
+      setAvatarPreview(URL.createObjectURL(compressed));
+    } catch (err) {
+      if (err instanceof FileTooLargeError) {
+        toast?.error ? toast.error(err.message) : alert(err.message);
+      } else {
+        console.error("Avatar compression failed:", err);
+        setAvatarFile(file);
+        setAvatarPreview(URL.createObjectURL(file));
+      }
     }
   };
 

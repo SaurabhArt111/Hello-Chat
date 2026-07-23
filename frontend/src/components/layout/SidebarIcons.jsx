@@ -11,6 +11,7 @@ import {
 import NotificationBadge from "../notifications/NotificationBadge";
 import { useNotificationContext } from "../../context/NotificationContext";
 import { useCallNotification } from "../../context/CallNotificationContext";
+import { FiUser } from "react-icons/fi";
 
 const SidebarIcons = ({
   activeView = "chats",
@@ -129,7 +130,7 @@ const SidebarIcons = ({
         whileTap={{ scale: 0.95 }}
         title="Profile"
       >
-        <span className="text-white text-lg">👤</span>
+        <FiUser className="text-white" size={20} />
       </motion.div>
 
     </div>

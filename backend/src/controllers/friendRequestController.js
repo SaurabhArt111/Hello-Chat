@@ -128,12 +128,17 @@ export const acceptRequest = async (req, res) => {
     );
 
     // Create or ensure Conversation (1-1 chat)
+    // NOTE: avoid `updateOne(..., { upsert: true })` here. Mongo can't unambiguously
+    // infer how to build `participants` from a query that uses $all/$size combined
+    // with $setOnInsert on the same path ("path 'participants' is matched twice").
+    // A plain findOne + create is simpler and avoids that ambiguity entirely.
     try {
-      await Conversation.updateOne(
-        { participants: { $all: [senderId, receiverId], $size: 2 } },
-        { $setOnInsert: { participants: [senderId, receiverId] } },
-        { upsert: true }
-      );
+      const existingConversation = await Conversation.findOne({
+        participants: { $all: [senderId, receiverId], $size: 2 },
+      });
+      if (!existingConversation) {
+        await Conversation.create({ participants: [senderId, receiverId] });
+      }
     } catch (convErr) {
       console.error("CONVERSATION UPSERT ERROR:", convErr);
     }

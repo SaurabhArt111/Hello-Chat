@@ -21,6 +21,7 @@ const GroupProfilePanel = React.lazy(() => import("../components/groups/GroupPro
 const ScheduleMessageModal = React.lazy(() => import("../components/chat/ScheduleMessageModal"));
 
 import socket from "../socket";
+import { FiArrowDown } from "react-icons/fi";
 import {
   saveMessage,
   getMessages,
@@ -979,7 +980,7 @@ const Home = () => {
 
         const formatted = res.data.map((m) => {
           const msgType = m.messageType || m.type || "text";
-          const isMedia = ["image", "video", "file", "link"].includes(msgType);
+          const isMedia = ["image", "video", "file", "link", "voice"].includes(msgType);
           const fileUrl = m.fileUrl || m.file || null;
 
           if (isMedia && fileUrl) {
@@ -989,6 +990,7 @@ const Home = () => {
               clientMessageId: m.clientMessageId,
               type: msgType,
               file: fileUrl,
+              duration: m.duration,
               text: m.text || m.fileName || "",
               isOwn,
               time: new Date(m.createdAt).toLocaleTimeString([], {
@@ -2620,7 +2622,7 @@ const Home = () => {
           onClick={handleScrollToBottom}
           className="absolute bottom-20 sm:bottom-8 right-4 sm:right-5 z-40 w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90"
         >
-          ↓
+          <FiArrowDown size={18} />
         </button>
       )}
 
