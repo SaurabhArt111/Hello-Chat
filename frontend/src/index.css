@@ -9,8 +9,12 @@ html {
 }
 
 body {
-  @apply antialiased;
+  @apply antialiased bg-white text-black;
   overscroll-behavior: none;
+}
+
+.dark body {
+  @apply bg-slate-900 text-white;
 }
 
 /* Ensure the app container fills the viewport properly */
@@ -28,17 +32,30 @@ body {
 
 .overflow-y-auto::-webkit-scrollbar-track,
 .overflow-auto::-webkit-scrollbar-track {
-  @apply bg-gray-200 dark: bg-neutral-800/50 rounded-full;
+  @apply bg-gray-200 rounded-full;
+}
+
+.dark .overflow-y-auto::-webkit-scrollbar-track,
+.dark .overflow-auto::-webkit-scrollbar-track {
+  @apply bg-neutral-800/50 rounded-full;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb,
 .overflow-auto::-webkit-scrollbar-thumb {
-  @apply bg-gray-400 dark: bg-neutral-600 rounded-full hover:bg-gray-500 dark:hover:bg-neutral-500;
+  @apply bg-gray-400 rounded-full hover:bg-gray-500;
 }
 
-/* Hide scrollbar on mobile for cleaner look */
-@media (max-width: 639px) {
+.dark .overflow-y-auto::-webkit-scrollbar-thumb,
+.dark .overflow-auto::-webkit-scrollbar-thumb {
+  @apply bg-neutral-600 rounded-full;
+}
 
+.overflow-y-auto::-webkit-scrollbar-thumb:hover,
+.overflow-auto::-webkit-scrollbar-thumb:hover {
+  @apply hover:bg-gray-500;
+}
+
+@media (max-width: 639px) {
   .overflow-y-auto::-webkit-scrollbar,
   .overflow-auto::-webkit-scrollbar {
     width: 0;
@@ -46,51 +63,14 @@ body {
   }
 }
 
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes slide-up { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-  to {
-    opacity: 1;
-  }
-}
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-slide-in-right { animation: slide-in-right 0.25s ease-out; }
+.animate-slide-up { animation: slide-up 0.3s ease-out; }
 
-@keyframes slide-in-right {
-  from {
-    transform: translateX(100%);
-  }
-
-  to {
-    transform: translateX(0);
-  }
-}
-
-@keyframes slide-up {
-  from {
-    transform: translateY(100%);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.animate-fade-in {
-  animation: fade-in 0.2s ease-out;
-}
-
-.animate-slide-in-right {
-  animation: slide-in-right 0.25s ease-out;
-}
-
-.animate-slide-up {
-  animation: slide-up 0.3s ease-out;
-}
-
-/* Responsive touch targets — ensure minimum size for mobile */
 @media (pointer: coarse) {
   button, [role="button"], a {
     min-height: 36px;
@@ -98,7 +78,6 @@ body {
   }
 }
 
-/* Safe area padding for iOS notch + bottom home indicator */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
