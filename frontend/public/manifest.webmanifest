@@ -1,0 +1,20 @@
+{
+  "name": "Hello Chat",
+  "short_name": "HelloChat",
+  "description": "Real-time messaging, voice notes, and calls.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "background_color": "#101820",
+  "theme_color": "#101820",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "icons": [
+    { "src": "/pwa-icons/icon-64.png", "sizes": "64x64", "type": "image/png" },
+    { "src": "/pwa-icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/pwa-icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

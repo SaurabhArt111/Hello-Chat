@@ -328,7 +328,7 @@ export const banUser = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       targetId,
       { isBanned: true },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -352,7 +352,7 @@ export const unbanUser = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       targetId,
       { isBanned: false },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -376,7 +376,7 @@ export const deactivateUser = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       targetId,
       { isOnline: false },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!user) return res.status(404).json({ message: "User not found" });
 
@@ -400,7 +400,7 @@ export const forceLogoutUser = async (req, res) => {
     const user = await User.findByIdAndUpdate(
       targetId,
       { $inc: { jwtVersion: 1 } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!user) return res.status(404).json({ message: "User not found" });
 

@@ -62,7 +62,7 @@ export const handleUserOffline = async (userId, io, onlineUsers = {}) => {
         online: false,
         lastSeen: now,
       },
-      { new: true }
+      { returnDocument: "after" }
     ).lean();
 
     if (!user) return;

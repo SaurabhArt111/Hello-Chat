@@ -22,6 +22,7 @@ const ProfilePanel = ({
   const [editing, setEditing] = useState(false);
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState(null);
+  const [removeAvatarFlag, setRemoveAvatarFlag] = useState(false);
   const [isBlocking, setIsBlocking] = useState(false);
   const [languages, setLanguages] = useState([]);
   const { preferredLanguage, setPreferredLanguage } = useLanguage();
@@ -100,6 +101,7 @@ const ProfilePanel = ({
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    setRemoveAvatarFlag(false);
     try {
       const compressed = await compressFileForUpload(file);
       setAvatarFile(compressed);
@@ -128,13 +130,17 @@ const ProfilePanel = ({
 
       if (avatarFile) {
         formData.append("avatar", avatarFile);
+      } else if (removeAvatarFlag) {
+        formData.append("removeAvatar", "true");
       }
 
       const res = await updateProfile(formData);
 
       localStorage.setItem("user", JSON.stringify(res.data));
       setUser(res.data);
-      setAvatarPreview(res.data.avatar);
+      setAvatarPreview(res.data.avatar || null);
+      setAvatarFile(null);
+      setRemoveAvatarFlag(false);
       if (res.data?.preferredLanguage) {
         setPreferredLanguage(res.data.preferredLanguage);
       }
@@ -144,9 +150,16 @@ const ProfilePanel = ({
     }
   };
 
+  /** Clears the profile picture entirely (falls back to the initials avatar). Takes effect on Save, like other profile edits. */
+  const handleRemoveAvatar = () => {
+    setAvatarFile(null);
+    setAvatarPreview(null);
+    setRemoveAvatarFlag(true);
+  };
+
   return (
     <motion.div
-      className="w-full md:w-[360px] h-full bg-white dark:bg-neutral-800/95 border-l border-gray-200 dark:border-neutral-700 p-4 md:p-5 flex flex-col overflow-y-auto"
+      className="w-full md:w-[340px] h-full bg-white dark:bg-neutral-800/95 border-l border-gray-200 dark:border-neutral-700 p-4 md:p-5 flex flex-col overflow-y-auto"
       initial={{ x: 40, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ type: "tween", duration: 0.3 }}
@@ -192,6 +205,15 @@ const ProfilePanel = ({
             )}
           </label>
         </div>
+        {editing && avatarPreview && (
+          <button
+            type="button"
+            onClick={handleRemoveAvatar}
+            className="mt-2 text-xs font-medium text-red-500 hover:text-red-600 hover:underline"
+          >
+            Remove photo
+          </button>
+        )}
 
         <h2 className="mt-3 font-semibold text-lg text-gray-900 dark:text-neutral-100">
           {user.username}

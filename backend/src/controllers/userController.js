@@ -1,5 +1,5 @@
 import User from "../models/User.js";
-import { saveAvatarBuffer, deleteLocalUpload } from "../utils/fileStorage.js";
+import { saveAvatarBuffer, deleteStoredFile } from "../utils/mediaStorage.js";
 import Friend from "../models/Friend.js";
 import FriendRequest from "../models/FriendRequest.js";
 import BlockedUser from "../models/BlockedUser.js";
@@ -18,16 +18,32 @@ import bcrypt from "bcryptjs";
 /* UPDATE PROFILE */
 export const updateProfile = async (req, res) => {
   try {
-    const { id, username, email, bio, preferredLanguage } = req.body;
+    const { id, username, email, bio, preferredLanguage, removeAvatar } = req.body;
 
     let avatarUrl = req.body.avatar;
-    let previousAvatar = null;
+    let avatarPublicId;
+    let previousPublicId = null;
 
-    // If new avatar uploaded, compress + save it locally instead of Cloudinary
+    const existing = await User.findById(id).select("avatar avatarPublicId").lean();
+    if (!existing) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    previousPublicId = existing.avatarPublicId || null;
+
     if (req.file) {
-      const existing = await User.findById(id).select("avatar").lean();
-      previousAvatar = existing?.avatar || null;
-      avatarUrl = await saveAvatarBuffer(req.file.buffer, req.file.mimetype);
+      // New avatar uploaded - replace whatever was there before.
+      const saved = await saveAvatarBuffer(req.file.buffer, req.file.mimetype);
+      avatarUrl = saved.url;
+      avatarPublicId = saved.publicId;
+    } else if (removeAvatar === "true" || removeAvatar === true) {
+      // Explicit "remove profile picture" - clear it and fall back to the
+      // app's default avatar placeholder instead of a broken image.
+      avatarUrl = "";
+      avatarPublicId = "";
+    } else {
+      // Nothing changed - keep the existing avatar untouched.
+      avatarUrl = existing.avatar;
+      avatarPublicId = previousPublicId;
     }
 
     const updatedUser = await User.findByIdAndUpdate(
@@ -38,18 +54,19 @@ export const updateProfile = async (req, res) => {
         bio,
         preferredLanguage,
         avatar: avatarUrl,
+        avatarPublicId,
       },
-      { new: true }
+      { returnDocument: "after" }
     );
 
     if (!updatedUser) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Remove the old avatar file now that the new one is saved & referenced,
-    // so uploads/avatars doesn't accumulate orphaned files over time.
-    if (previousAvatar && previousAvatar !== avatarUrl) {
-      deleteLocalUpload(previousAvatar);
+    // Clean up the old file now that the new one is saved & referenced (or
+    // the avatar was removed), so storage doesn't accumulate orphaned files.
+    if (previousPublicId && previousPublicId !== avatarPublicId) {
+      deleteStoredFile(previousPublicId).catch(() => {});
     }
 
     // Keep response shape consistent with login (id instead of _id)
@@ -452,7 +469,7 @@ export const deleteMyAccount = async (req, res) => {
       return res.status(401).json({ message: "Invalid password" });
     }
 
-    const avatarUrl = user.avatar;
+    const avatarPublicId = user.avatarPublicId;
 
     await Friend.deleteMany(
       {
@@ -504,12 +521,10 @@ export const deleteMyAccount = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    if (avatarUrl) {
-      try {
-        deleteLocalUpload(avatarUrl);
-      } catch (fileErr) {
-        console.error("Error deleting local avatar file:", fileErr);
-      }
+    if (avatarPublicId) {
+      deleteStoredFile(avatarPublicId).catch((fileErr) => {
+        console.error("Error deleting avatar file:", fileErr);
+      });
     }
 
     return res.status(200).json({
@@ -522,5 +537,44 @@ export const deleteMyAccount = async (req, res) => {
     return res.status(500).json({
       error: "Failed to delete account. Please try again later.",
     });
+  }
+};
+/**
+ * PUT /api/users/e2ee-key
+ * Body: { publicKey } - base64-encoded X25519 public key generated
+ * client-side (see frontend/src/utils/e2ee.js). The matching private key
+ * never leaves the device; this is the only half of the keypair the
+ * server ever sees.
+ */
+export const setE2eePublicKey = async (req, res) => {
+  try {
+    const { publicKey } = req.body;
+    if (!publicKey || typeof publicKey !== "string") {
+      return res.status(400).json({ message: "publicKey is required" });
+    }
+    await User.findByIdAndUpdate(req.user, { e2eePublicKey: publicKey });
+    return res.json({ message: "Public key updated" });
+  } catch (err) {
+    console.error("SET E2EE KEY ERROR:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+/**
+ * GET /api/users/:userId/e2ee-key
+ * Lets a client fetch a friend's public key to encrypt messages to them.
+ * Returns "" if the user hasn't generated a keypair yet (older account or
+ * hasn't opened the app since E2EE was added) - the client falls back to
+ * unencrypted sending in that case and can prompt to re-key once both
+ * sides have upgraded.
+ */
+export const getE2eePublicKey = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId).select("e2eePublicKey").lean();
+    if (!user) return res.status(404).json({ message: "User not found" });
+    return res.json({ publicKey: user.e2eePublicKey || "" });
+  } catch (err) {
+    console.error("GET E2EE KEY ERROR:", err);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };

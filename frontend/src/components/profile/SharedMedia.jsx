@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "../../api/axios";
 import socket from "../../socket";
-import { FiFile, FiLink } from "react-icons/fi";
+import { FiFile, FiLink, FiImage } from "react-icons/fi";
 
 const TABS = [
   { id: "media", label: "Media" },
@@ -19,6 +19,17 @@ const SharedMedia = ({ currentUserId, selectedUserId }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [previewItem, setPreviewItem] = useState(null);
+  // Media uploaded before the storage migration (see backend/utils/mediaStorage.js)
+  // may point at files that no longer exist. Track those so we can show a
+  // clean "unavailable" placeholder instead of a broken image icon.
+  const [failedItems, setFailedItems] = useState(() => new Set());
+  const markFailed = (id) =>
+    setFailedItems((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
 
   const canLoad = Boolean(
     currentUserId &&
@@ -185,30 +196,43 @@ const SharedMedia = ({ currentUserId, selectedUserId }) => {
         {/* Media grid */}
         {activeTab === "media" && activeData.length > 0 && (
           <div className="grid grid-cols-3 gap-2">
-            {activeData.map((item) => (
-              <button
-                key={item._id}
-                type="button"
-                onClick={() => setPreviewItem(item)}
-                className="relative group overflow-hidden rounded-xl bg-gray-100 dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 aspect-square hover:border-gray-400 dark:hover:border-neutral-500 transition-colors"
-              >
-                {item.messageType === "video" ? (
-                  <video
-                    src={item.fileUrl}
-                    className="w-full h-full object-cover"
-                    preload="metadata"
-                  />
-                ) : (
-                  <img
-                    src={item.fileUrl}
-                    alt=""
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                  />
-                )}
-                <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </button>
-            ))}
+            {activeData.map((item) => {
+              const failed = failedItems.has(item._id);
+              return (
+                <button
+                  key={item._id}
+                  type="button"
+                  onClick={() => !failed && setPreviewItem(item)}
+                  disabled={failed}
+                  className="relative group overflow-hidden rounded-xl bg-gray-100 dark:bg-neutral-700 border border-gray-300 dark:border-neutral-600 aspect-square hover:border-gray-400 dark:hover:border-neutral-500 transition-colors disabled:cursor-default"
+                >
+                  {failed ? (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-gray-400 dark:text-neutral-500">
+                      <FiImage size={22} />
+                      <span className="text-[10px]">Unavailable</span>
+                    </div>
+                  ) : item.messageType === "video" ? (
+                    <video
+                      src={item.fileUrl}
+                      className="w-full h-full object-cover"
+                      preload="metadata"
+                      onError={() => markFailed(item._id)}
+                    />
+                  ) : (
+                    <img
+                      src={item.fileUrl}
+                      alt=""
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                      onError={() => markFailed(item._id)}
+                    />
+                  )}
+                  {!failed && (
+                    <div className="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
 

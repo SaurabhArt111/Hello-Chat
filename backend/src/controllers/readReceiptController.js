@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Message from "../models/Message.js";
+import Conversation from "../models/Conversation.js";
 
 /**
  * POST /api/messages/mark-seen
@@ -26,6 +27,14 @@ export const markSeen = async (req, res) => {
       },
       { $set: { status: "seen", seenAt: new Date() } }
     );
+
+    // Reset the denormalized unread badge for this conversation (see
+    // models/Conversation.js) so the chat list doesn't need to recompute
+    // it by counting messages.
+    await Conversation.updateOne(
+      { participants: { $all: [chatUserId, currentUserId], $size: 2 } },
+      { $set: { [`unreadCount.${String(currentUserId)}`]: 0 } }
+    ).catch(() => {});
 
     const io = req.app.get("io");
     if (io && result.modifiedCount > 0) {

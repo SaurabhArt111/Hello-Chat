@@ -73,12 +73,8 @@ const MessageSoundToggle = () => {
             }`}
           />
         </button>
-        {/* Simple preview sound; replace src with your own sound file if desired */}
-        <audio
-          ref={audioRef}
-          src="https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3"
-          preload="auto"
-        />
+        {/* Preview plays the actual sound used for incoming messages (see utils/messageSound.js) */}
+        <audio ref={audioRef} src="/sounds/receive.mp3" preload="auto" />
       </div>
     </div>
   );

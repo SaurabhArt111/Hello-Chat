@@ -3,6 +3,7 @@ import React, {
   useContext,
   useEffect,
   useState,
+  useCallback,
 } from "react";
 
 const DarkModeContext = createContext();
@@ -25,40 +26,74 @@ const updateThemeClass = (isDark) => {
   }
 };
 
+const getSystemPrefersDark = () =>
+  typeof window !== "undefined" && window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: dark)").matches
+    : false;
+
+/**
+ * Theme modes: "light" | "dark" | "system". `darkMode` (boolean) is kept
+ * as a derived value for backward compatibility with existing consumers
+ * that only care whether dark styling is currently active - it reflects
+ * the OS preference live when themeMode is "system".
+ */
 export const DarkModeProvider = ({ children }) => {
+  const [themeMode, setThemeModeState] = useState("light");
   const [darkMode, setDarkMode] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Initialize theme from localStorage, default to LIGHT
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("theme");
-    
-    if (!savedTheme) {
-      // First time user → default LIGHT
-      updateThemeClass(false);
-      localStorage.setItem("theme", "light");
-      setDarkMode(false);
-    } else if (savedTheme === "dark") {
-      updateThemeClass(true);
-      setDarkMode(true);
-    } else {
-      updateThemeClass(false);
-      setDarkMode(false);
-    }
-    
-    setLoading(false);
+  const applyMode = useCallback((mode) => {
+    const isDark = mode === "system" ? getSystemPrefersDark() : mode === "dark";
+    updateThemeClass(isDark);
+    setDarkMode(isDark);
   }, []);
 
-  // Toggle theme and save to localStorage
-  const toggleDarkMode = () => {
-    const next = !darkMode;
-    setDarkMode(next);
-    updateThemeClass(next);
-    localStorage.setItem("theme", next ? "dark" : "light");
-  };
+  // Initialize theme from localStorage, default to LIGHT.
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme");
+    const initialMode =
+      savedTheme === "dark" || savedTheme === "light" || savedTheme === "system"
+        ? savedTheme
+        : "light";
+
+    if (!savedTheme) {
+      localStorage.setItem("theme", "light");
+    }
+
+    setThemeModeState(initialMode);
+    applyMode(initialMode);
+    setLoading(false);
+  }, [applyMode]);
+
+  // While in "system" mode, keep in sync with live OS theme changes
+  // (e.g. the device switches to dark mode at sunset) without a reload.
+  useEffect(() => {
+    if (themeMode !== "system" || typeof window === "undefined" || !window.matchMedia) return;
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => applyMode("system");
+    mql.addEventListener?.("change", handleChange);
+    return () => mql.removeEventListener?.("change", handleChange);
+  }, [themeMode, applyMode]);
+
+  const setThemeMode = useCallback(
+    (mode) => {
+      if (!["light", "dark", "system"].includes(mode)) return;
+      setThemeModeState(mode);
+      applyMode(mode);
+      localStorage.setItem("theme", mode);
+    },
+    [applyMode]
+  );
+
+  /** Back-compat: cycles light <-> dark (does not select "system" - use setThemeMode for that). */
+  const toggleDarkMode = useCallback(() => {
+    setThemeMode(darkMode ? "light" : "dark");
+  }, [darkMode, setThemeMode]);
 
   const value = {
     darkMode,
+    themeMode,
+    setThemeMode,
     loading,
     toggleDarkMode,
   };
@@ -69,4 +104,3 @@ export const DarkModeProvider = ({ children }) => {
     </DarkModeContext.Provider>
   );
 };
-

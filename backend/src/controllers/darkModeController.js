@@ -49,7 +49,7 @@ export const updateDarkMode = async (req, res) => {
     const updated = await DarkMode.findOneAndUpdate(
       { userId },
       { userId, darkMode },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
     res.json({

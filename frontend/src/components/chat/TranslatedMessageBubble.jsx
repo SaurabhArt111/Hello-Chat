@@ -236,7 +236,7 @@ export default function TranslatedMessageBubble({
                   {showTranslated ? "Show original" : "Show translation"}
                 </button>
               )}
-              {canRequestTranslation && (
+              {/* {canRequestTranslation && (
                 <button
                   type="button"
                   onClick={handleRequestTranslation}
@@ -245,7 +245,7 @@ export default function TranslatedMessageBubble({
                 >
                   {translating ? "Translating…" : "Translate"}
                 </button>
-              )}
+              )} */}
             </>
           )}
 

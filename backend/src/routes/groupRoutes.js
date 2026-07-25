@@ -13,7 +13,7 @@ import {
   disbandGroup,
 } from "../controllers/groupController.js";
 import { protect } from "../middleware/authMiddleware.js";
-import upload from "../middleware/groupLogoUploadMiddleware.js";
+import { imageOnlyUpload as upload } from "../middleware/memoryUpload.js";
 
 const router = express.Router();
 

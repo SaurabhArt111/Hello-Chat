@@ -3,8 +3,7 @@ import Group from "../models/Group.js";
 import User from "../models/User.js";
 import Message from "../models/Message.js";
 import FriendRequest from "../models/FriendRequest.js";
-import { maybeCompressImageFile, deleteLocalUpload } from "../utils/fileStorage.js";
-import { buildFileUrl } from "../utils/buildFileUrl.js";
+import { saveGroupLogoBuffer, deleteStoredFile } from "../utils/mediaStorage.js";
 
 /* HELPER: Check if user is admin */
 const isAdmin = (group, userId) => {
@@ -337,18 +336,14 @@ export const uploadGroupLogo = async (req, res) => {
       return res.status(403).json({ message: "Only admins can change group logo" });
     }
 
-    let finalFilename = req.file.filename;
-    const compressedName = await maybeCompressImageFile(req.file.path, req.file.mimetype);
-    if (compressedName) finalFilename = compressedName;
+    const saved = await saveGroupLogoBuffer(req.file.buffer);
 
-    const relativePath = `/uploads/groups/${finalFilename}`;
-    const logoUrl = buildFileUrl(req, relativePath);
-
-    const previousLogo = group.groupLogo;
-    group.groupLogo = logoUrl;
+    const previousPublicId = group.logoPublicId;
+    group.groupLogo = saved.url;
+    group.logoPublicId = saved.publicId;
     await group.save();
-    if (previousLogo && previousLogo !== logoUrl) {
-      deleteLocalUpload(previousLogo);
+    if (previousPublicId && previousPublicId !== saved.publicId) {
+      deleteStoredFile(previousPublicId).catch(() => {});
     }
     await group.populate("members.user", "username avatar email");
     await group.populate("createdBy", "username avatar");

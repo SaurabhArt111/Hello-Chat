@@ -50,7 +50,7 @@ export const saveLanguage = async (req, res) => {
     const doc = await UserLanguage.findOneAndUpdate(
       { userId },
       { preferredLanguage },
-      { new: true, upsert: true }
+      { returnDocument: "after", upsert: true }
     );
 
     // Mirror in User (store CODE, not display name)

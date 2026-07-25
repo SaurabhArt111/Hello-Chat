@@ -57,7 +57,6 @@ const ChatHeader = ({
   onUnblock,
   onSearchSelectMessage,
   searchMessagesList = [],
-  onClose,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSearchBar, setShowSearchBar] = useState(false);
@@ -304,13 +303,6 @@ const ChatHeader = ({
             </div>
           )}
         </div>
-
-        {/* Close button — only when onClose is provided */}
-        {onClose && (
-          <IconBtn onClick={onClose} label="Close chat">
-            <X size={19} />
-          </IconBtn>
-        )}
       </div>
     </header>
   );

@@ -1,7 +1,9 @@
 import express from "express";
-import upload from "../middleware/upload.js";
+import upload from "../middleware/memoryUpload.js";
 import {
   updateProfile,
+  setE2eePublicKey,
+  getE2eePublicKey,
   getUserProfile,
   searchUsers,
   getDiscoverUsers,
@@ -34,6 +36,8 @@ router.get("/contacts", protect, getContacts);
 
 // Profile Operations
 router.put("/update", protect, upload.single("avatar"), updateProfile);
+router.put("/e2ee-key", protect, setE2eePublicKey);
+router.get("/:userId/e2ee-key", protect, getE2eePublicKey);
 router.get("/:userId", protect, checkProfilePhotoPrivacy, getUserProfile);
 router.delete("/me", protect, deleteMyAccount);
 

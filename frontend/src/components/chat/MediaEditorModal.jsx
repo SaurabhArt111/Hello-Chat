@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   FiX,
   FiRotateCw,
@@ -44,6 +45,7 @@ export default function MediaEditorModal({ file, onCancel, onConfirm }) {
   const [activeStroke, setActiveStroke] = useState(null);
   const [pendingTextPos, setPendingTextPos] = useState(null);
   const [textDraft, setTextDraft] = useState("");
+  const [mounted, setMounted] = useState(false);
 
   const imgRef = useRef(null);
   const canvasRef = useRef(null);
@@ -55,6 +57,10 @@ export default function MediaEditorModal({ file, onCancel, onConfirm }) {
     setObjectUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -213,10 +219,10 @@ export default function MediaEditorModal({ file, onCancel, onConfirm }) {
     onConfirm(finalFile, caption.trim());
   };
 
-  if (!file) return null;
+  if (!file || !mounted) return null;
 
-  return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col">
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] bg-black flex flex-col min-h-screen overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-3 text-white">
         <button onClick={onCancel} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Cancel">
@@ -360,6 +366,7 @@ export default function MediaEditorModal({ file, onCancel, onConfirm }) {
           <FiSend size={20} />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

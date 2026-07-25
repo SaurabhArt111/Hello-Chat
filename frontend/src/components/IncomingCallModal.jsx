@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Phone, PhoneOff, Video } from "lucide-react";
 import { callTheme } from "../constants/callTheme";
 import { buttonPressSpring, ripplePulse } from "../animations/callAnimations";
+import { startRingtone, stopRingtone } from "../utils/ringtone";
 
 const MotionDiv = motion.div;
 const MotionButton = motion.button;
@@ -22,14 +23,12 @@ export default function IncomingCallModal({
 }) {
   const [dragX, setDragX] = useState(0);
   const [dragY, setDragY] = useState(0);
-  const audioRef = useRef(null);
 
   useEffect(() => {
     if (!isVisible) return undefined;
-    if (audioRef.current) {
-      audioRef.current.volume = 0.5;
-      audioRef.current.play().catch(() => {});
-    }
+
+    startRingtone();
+    if (navigator.vibrate) navigator.vibrate([300, 200, 300, 200, 300]);
 
     if (!isForeground && "Notification" in window && Notification.permission === "granted") {
       const notification = new Notification("Incoming call", {
@@ -37,21 +36,19 @@ export default function IncomingCallModal({
         silent: false,
       });
       notification.onclick = () => window.focus();
-      return () => notification.close();
+      return () => {
+        stopRingtone();
+        notification.close();
+      };
     }
 
-    return undefined;
+    return () => stopRingtone();
   }, [isVisible, callerName, isForeground]);
 
   if (!isVisible) return null;
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-xl">
-      <audio
-        ref={audioRef}
-        src="https://assets.mixkit.co/active_storage/sfx/2562-ring-tone-1.mp3"
-        loop
-      />
       <MotionDiv className="relative w-full max-w-md px-6 py-10 text-center text-white">
         {/* Waveform rings behind avatar */}
         <div className="absolute left-1/2 top-24 -translate-x-1/2">

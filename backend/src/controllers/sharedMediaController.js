@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import Message from "../models/Message.js";
+import Conversation from "../models/Conversation.js";
 import { buildFileUrl } from "../utils/buildFileUrl.js";
 
 // GET /api/shared-media/:currentUserId/:selectedUserId
@@ -36,15 +37,25 @@ export const getSharedMedia = async (req, res) => {
     const cid = new mongoose.Types.ObjectId(currentUserId);
     const sid = new mongoose.Types.ObjectId(selectedUserId);
 
+    const conversation = await Conversation.findOne({
+      participants: { $all: [currentUserId, selectedUserId], $size: 2 },
+    })
+      .select("_id")
+      .lean();
+
     // Messages between these two users that have media, file, or link content
-    const baseQuery = {
-      $and: [
-        {
+    const participantClause = conversation
+      ? { conversationId: conversation._id }
+      : {
           $or: [
             { sender: cid, receiver: sid },
             { sender: sid, receiver: cid },
           ],
-        },
+        };
+
+    const baseQuery = {
+      $and: [
+        participantClause,
         {
           $or: [
             { messageType: { $in: ["image", "video", "file"] } },

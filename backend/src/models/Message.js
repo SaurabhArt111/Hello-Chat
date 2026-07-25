@@ -14,7 +14,34 @@ const messageSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
     },
+    /**
+     * 1:1 messages only. Lets chat history be a single indexed range query
+     * (`{conversationId, createdAt}`) instead of an `$or` scan over
+     * sender/receiver - see models/Conversation.js for why.
+     */
+    conversationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Conversation",
+    },
     text: String,
+    /**
+     * End-to-end encryption (1:1 chats only - see frontend/src/utils/e2ee.js).
+     * When `encrypted` is true, `text` is NOT readable plaintext: the real
+     * content lives in `ciphertext` (NaCl box, base64) + `nonce`, and only
+     * the two participants' devices can decrypt it. The server stores and
+     * relays ciphertext only; `text`/`translatedText` are left blank for
+     * encrypted messages so nothing readable ever touches the database.
+     */
+    encrypted: {
+      type: Boolean,
+      default: false,
+    },
+    ciphertext: String,
+    nonce: String,
+    // Sender's E2EE public key AT SEND TIME, so the recipient can verify
+    // which keypair encrypted this message even if the sender later
+    // rotates keys (e.g. new device/reinstall).
+    senderE2eePublicKey: String,
     // Legacy type/file fields used throughout the app
     type: {
       type: String,
@@ -32,6 +59,30 @@ const messageSchema = new mongoose.Schema(
     fileSize: String,
     // Duration in seconds, used by voice-note playback (messageType: "voice")
     duration: Number,
+    // Cloudinary public_id for fileUrl, so it can be deleted from storage
+    // when the message is deleted-for-everyone.
+    filePublicId: String,
+    /**
+     * Structured attachment metadata (mirrors fileUrl/fileName/fileSize/
+     * duration above for the primary attachment, kept for backward
+     * compatibility with existing UI code). `width`/`height` let the
+     * client size image/video containers correctly *before* the media has
+     * loaded, avoiding layout jumps; `thumbnailUrl` is used for video
+     * poster frames.
+     */
+    attachments: [
+      {
+        url: String,
+        publicId: String,
+        mimeType: String,
+        fileName: String,
+        fileSize: Number, // bytes
+        width: Number,
+        height: Number,
+        duration: Number,
+        thumbnailUrl: String,
+      },
+    ],
     status: {
       type: String,
       // NOTE: We extend this enum to support server-side scheduling.
@@ -130,8 +181,28 @@ const messageSchema = new mongoose.Schema(
 
 // Fast queries for scheduling + common access patterns
 messageSchema.index({ status: 1, scheduledFor: 1 });
+messageSchema.index({ status: 1, createdAt: -1 });
+
+// Primary pagination path for 1:1 chat history (see Conversation.js) -
+// this single compound index replaces the old $or{sender,receiver} scan.
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+// Primary pagination path for group chat history (getGroupMessages was
+// previously unindexed and unpaginated - same "load everything" bug).
+messageSchema.index({ group: 1, createdAt: -1 });
+// Legacy/back-compat lookups (migration period, admin tooling, DMs sent
+// before a conversationId existed on every row).
 messageSchema.index({ sender: 1, createdAt: -1 });
 messageSchema.index({ receiver: 1, createdAt: -1 });
-messageSchema.index({ status: 1, createdAt: -1 });
+// Idempotent send/retry lookups (see saveMessage/uploadFile).
+// Only index messages that actually provide a string clientMessageId. This
+// avoids duplicate-null collisions when older documents include
+// clientMessageId:null.
+messageSchema.index(
+  { sender: 1, clientMessageId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { clientMessageId: { $type: "string" } },
+  }
+);
 
 export default mongoose.model("Message", messageSchema);

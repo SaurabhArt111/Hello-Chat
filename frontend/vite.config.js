@@ -9,6 +9,17 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      // injectManifest (instead of the default generateSW) lets us ship a
+      // custom service worker (src/sw.js) that handles Web Push events -
+      // needed to ring/notify for incoming and missed calls even when the
+      // app isn't open. generateSW only supports precaching/runtime
+      // caching, with no hook for custom push/notificationclick handlers.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
+      },
       registerType: 'autoUpdate', // auto-installs new SW versions, no manual refresh needed
       includeAssets: ['apple-touch-icon.png'],
       manifest: {
@@ -30,36 +41,6 @@ export default defineConfig({
           { src: '/pwa-icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
           { src: '/pwa-icons/maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
           { src: '/pwa-icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-        ],
-      },
-      workbox: {
-        // App-shell + static assets are precached for offline load.
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff,woff2}'],
-        // Keep the service worker from trying to cache/intercept the API,
-        // socket.io, or uploaded media - those must always hit the network.
-        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//],
-        runtimeCaching: [
-          {
-            // Uploaded chat media: cache-first once fetched, so images/voice
-            // notes you've already opened still work offline.
-            urlPattern: ({ url }) => url.pathname.startsWith('/uploads/'),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'uploaded-media',
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-          {
-            // API calls: network-first with a short cache fallback so the
-            // app can show last-known data if you briefly lose connection.
-            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 6,
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 },
-            },
-          },
         ],
       },
       devOptions: {

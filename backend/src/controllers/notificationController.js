@@ -72,7 +72,7 @@ export const updateNotificationSetting = async (req, res) => {
     const updated = await NotificationSetting.findOneAndUpdate(
       { userId },
       { userId, notifications },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
     return res.json({

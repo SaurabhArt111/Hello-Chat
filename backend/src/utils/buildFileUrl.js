@@ -13,7 +13,9 @@
 export function buildFileUrl(req, relativePath) {
   const path = relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
   const isLocalDev = process.env.NODE_ENV !== "production";
-  const protocol = isLocalDev ? req.protocol : "https";
-  const host = req.get("host");
+  const host = req.get("host") || "localhost";
+  const hostname = host.split(":")[0];
+  const isLocalhost = /^(localhost|127\.0\.0\.1)$/i.test(hostname);
+  const protocol = isLocalDev && isLocalhost ? "http" : req.protocol;
   return `${protocol}://${host}${path}`;
 }

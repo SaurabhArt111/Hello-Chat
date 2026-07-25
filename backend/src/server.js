@@ -1,7 +1,7 @@
+import 'dotenv/config';
 import express from "express";
 import mongoose from "mongoose";
 import cors from "cors";
-import dotenv from "dotenv";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
@@ -27,6 +27,8 @@ import scheduledMessageRoutes from "./routes/scheduledMessageRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import reportRoutes from "./routes/reportRoutes.js";
+import pushRoutes from "./routes/pushRoutes.js";
+import { sendCallPush, sendMessagePush } from "./utils/webPush.js";
 
 import {
   handleUserOnline,
@@ -35,6 +37,7 @@ import {
 
 import { isBlocked } from "./controllers/blockController.js";
 import Message from "./models/Message.js";
+import Conversation from "./models/Conversation.js";
 import Group from "./models/Group.js";
 import Call from "./models/Call.js";
 import Notification from "./models/Notification.js";
@@ -42,8 +45,7 @@ import { processScheduledMessages } from "./controllers/scheduledMessageControll
 import { processSelfDestructingGroups } from "./controllers/groupDestructController.js";
 import User from "./models/User.js";
 import os from "os";
-
-dotenv.config();
+import path from "path";
 
 const app = express();
 const httpServer = createServer(app);
@@ -82,6 +84,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options(corsOptions);
 
 const io = new Server(httpServer, {
   cors: {
@@ -92,6 +95,8 @@ const io = new Server(httpServer, {
 });
 
 app.set("io", io);
+
+app.options("/*", cors(corsOptions));
 
 /* ---------------- SOCKET AUTH (non-breaking) ---------------- */
 // If the client provides a JWT in handshake auth, validate it and attach userId.
@@ -113,9 +118,8 @@ io.use((socket, next) => {
 });
 
 /* ---------------- MIDDLEWARE ---------------- */
-app.use(cors());
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.resolve("uploads")));
 
 /* ---------------- ROUTES ---------------- */
 app.use("/api/auth", authRoutes);
@@ -138,6 +142,7 @@ app.use("/api/groups", groupRoutes);
 app.use("/api/scheduled-messages", scheduledMessageRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/push", pushRoutes);
 
 /* ---------------- HTTPS URL SAFETY NET ---------------- */
 // Old rows saved before the trust-proxy fix have "http://<this-host>/..."
@@ -148,11 +153,18 @@ app.use("/api/reports", reportRoutes);
 app.use((req, res, next) => {
   const host = req.get("host");
   if (!host) return next();
+  const hostname = host.split(":")[0];
+  const isLocalhost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/i.test(hostname);
   const httpPrefix = `http://${host}`;
   const httpsPrefix = `https://${host}`;
 
   const rewrite = (value) => {
     if (typeof value === "string") {
+      if (isLocalhost && process.env.NODE_ENV !== "production") {
+        return value.startsWith(httpsPrefix)
+          ? httpPrefix + value.slice(httpsPrefix.length)
+          : value;
+      }
       return value.startsWith(httpPrefix)
         ? httpsPrefix + value.slice(httpPrefix.length)
         : value;
@@ -213,6 +225,23 @@ io.on("connection", (socket) => {
     socket.join(uid);
 
     handleUserOnline(uid, io, onlineUsers);
+
+    // If someone tried to call this user while they were offline and the
+    // 15/30s missed-call window hasn't elapsed yet, ring them now instead
+    // of leaving it to silently expire into a missed call they never even
+    // saw arrive.
+    const pendingOfflineCalls = app.get("pendingOfflineCalls");
+    const pending = pendingOfflineCalls?.get(uid);
+    if (pending) {
+      pendingOfflineCalls.delete(uid);
+      io.to(uid).emit("incoming_call", {
+        callerId: pending.callerId,
+        receiverId: pending.receiverId,
+        callType: pending.callType,
+        callerName: pending.callerName,
+        callId: pending.callId,
+      });
+    }
 
     const list = getOnlineList();
     io.emit("onlineUsers", list);
@@ -423,6 +452,14 @@ io.on("connection", (socket) => {
     try {
       if (!senderId || !receiverId) return;
       const now = new Date();
+
+      // Reset the denormalized unread badge (see models/Conversation.js) -
+      // this is the primary real-time path, markSeen (REST) covers the
+      // fallback/offline-catch-up case.
+      Conversation.updateOne(
+        { participants: { $all: [senderId, receiverId], $size: 2 } },
+        { $set: { [`unreadCount.${String(receiverId)}`]: 0 } }
+      ).catch(() => {});
 
       if (Array.isArray(messageIds) && messageIds.length) {
         const ids = messageIds
@@ -653,6 +690,11 @@ io.on("connection", (socket) => {
   /* ---------- CALL SIGNALING ---------- */
   const callTimeouts = app.get("callTimeouts") || new Map();
   app.set("callTimeouts", callTimeouts);
+  // Calls placed to a currently-offline user: kept here so that if they
+  // reconnect before the missed-call timeout fires, we can still deliver
+  // "incoming_call" instead of the caller being stuck with no feedback.
+  const pendingOfflineCalls = app.get("pendingOfflineCalls") || new Map();
+  app.set("pendingOfflineCalls", pendingOfflineCalls);
 
   socket.on("call_user", async ({ callerId, receiverId, callType, callerName, callId }) => {
     try {
@@ -662,6 +704,7 @@ io.on("connection", (socket) => {
       }
 
       const receiverRoom = onlineUsers[String(receiverId)];
+      let isOffline = false;
       if (receiverRoom) {
         io.to(receiverRoom).emit("incoming_call", {
           callerId,
@@ -671,8 +714,27 @@ io.on("connection", (socket) => {
           callId,
         });
       } else {
-        io.to(socket.id).emit("call_rejected", { message: "User is offline" });
-        return;
+        // Previously this immediately rejected the call ("User is
+        // offline") and stopped. Instead: let the caller keep "ringing"
+        // (with an explicit offline flag so the UI can show "Calling...
+        // they're offline" rather than a bare failure), push-notify the
+        // receiver's device(s) so a PWA install can still ring/alert them,
+        // and fall through to the SAME 15s missed-call timer below so
+        // an unanswered offline call is logged and notified exactly like
+        // an unanswered online call.
+        isOffline = true;
+        io.to(socket.id).emit("call_ringing_offline", {
+          receiverId,
+          message: "User is offline - notifying their device",
+        });
+        pendingOfflineCalls.set(String(receiverId), {
+          callerId,
+          receiverId,
+          callType: callType || "audio",
+          callerName: callerName || "Someone",
+          callId,
+        });
+        sendCallPush(receiverId, { type: "incoming_call", callerName, callType }).catch(() => {});
       }
 
       // Auto-missed-call timer (15s) for unanswered calls
@@ -682,6 +744,7 @@ io.on("connection", (socket) => {
       }
       const timeoutId = setTimeout(async () => {
         callTimeouts.delete(key);
+        pendingOfflineCalls.delete(String(receiverId));
         try {
           // Find most recent ongoing call between these users
           let call = null;
@@ -729,6 +792,7 @@ io.on("connection", (socket) => {
           // Emit full notification object in real-time for panels & badges
           // Only emit notification_created to avoid duplicate processing
           io.to(String(receiverId)).emit("notification_created", notification);
+          sendCallPush(receiverId, { type: "missed_call", callerName, callType }).catch(() => {});
 
           const finalCallId = call ? String(call._id) : callId ? String(callId) : undefined;
 
@@ -760,7 +824,7 @@ io.on("connection", (socket) => {
         } catch (err) {
           console.error("Auto-missed-call timer error:", err);
         }
-      }, 15_000);
+      }, isOffline ? 30_000 : 15_000);
       callTimeouts.set(key, timeoutId);
     } catch (err) {
       console.error("call_user error:", err);
@@ -864,6 +928,24 @@ async function startServer() {
     await mongoose.connect(process.env.MONGO_URI);
 
     console.log("MongoDB Atlas connected");
+
+    try {
+      const existingIndexes = await Message.collection.indexes();
+      const clientMessageIndex = existingIndexes.find(
+        (idx) => idx.name === "sender_1_clientMessageId_1"
+      );
+      if (clientMessageIndex) {
+        await Message.collection.dropIndex("sender_1_clientMessageId_1");
+        console.log("Dropped legacy sender+clientMessageId index");
+      }
+    } catch (err) {
+      console.warn(
+        "Could not drop legacy sender+clientMessageId index:",
+        err.message
+      );
+    }
+
+    await Message.syncIndexes();
 
     // Ensure default admin user exists (for initial login)
     try {

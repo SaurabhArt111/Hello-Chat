@@ -46,9 +46,7 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
     if (caption) formData.append("text", caption);
 
     try {
-      const res = await axios.post("/messages/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await axios.post("/messages/upload", formData);
       const saved = res.data;
       if (onMediaMessage) onMediaMessage(saved);
     } catch (err) {
@@ -166,9 +164,7 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
         formData.append("messageType", "voice");
         formData.append("duration", String(durationSec));
         try {
-          const res = await axios.post("/messages/upload", formData, {
-            headers: { "Content-Type": "multipart/form-data" },
-          });
+          const res = await axios.post("/messages/upload", formData);
           const saved = res.data;
           if (saved && !saved.messageType) saved.messageType = "voice";
           if (onMediaMessage) onMediaMessage(saved);

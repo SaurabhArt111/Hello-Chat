@@ -32,7 +32,9 @@ import {
   getRecentChats,
 } from "../api/messages";
 import { amBlocking, checkBlocked, blockUser, unblockUser } from "../api/block";
-import { playSendSound } from "../utils/messageSound";
+import { playReceiveSound } from "../utils/messageSound";
+import { ensureE2eeIdentity, encryptForPeer, decryptMessageObject } from "../utils/e2ee";
+import { setupPushNotifications } from "../utils/push";
 import { translateText } from "../utils/translateService";
 import { useLanguage } from "../context/LanguageContext";
 import { getFriends } from "../api/friends";
@@ -97,10 +99,16 @@ const Home = () => {
   const [loadingGroups, setLoadingGroups] = useState(true);
   const [friendsLoadError, setFriendsLoadError] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // Per-conversation "load older messages" state (see getMessages pagination).
+  const [olderPagination, setOlderPagination] = useState({}); // { [conversationId]: { hasMore, oldestCursor } }
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const toast = useToastContext();
 
   const messagesContainerRef = useRef(null);
+  const activeChatRef = useRef(null);
+  const olderPaginationRef = useRef({});
+  const loadingOlderRef = useRef(false);
   const [userStatus, setUserStatus] = useState({});
   const [forwardModalOpen, setForwardModalOpen] = useState(false);
   const [forwardMessageId, setForwardMessageId] = useState(null);
@@ -113,6 +121,14 @@ const Home = () => {
   const preferredLanguageRef = useRef(preferredLanguage);
   useEffect(() => { preferredLanguageRef.current = preferredLanguage; }, [preferredLanguage]);
   const restoredActiveChatRef = useRef(false);
+
+  // One-time setup per app load: generate/verify this device's E2EE
+  // keypair (see utils/e2ee.js) and register for Web Push so incoming
+  // calls/missed calls can notify this device in the background.
+  useEffect(() => {
+    ensureE2eeIdentity().catch(() => {});
+    setupPushNotifications().catch(() => {});
+  }, []);
 
   // Socket connection status
   const [socketConnected, setSocketConnected] = useState(socket.connected);
@@ -253,6 +269,118 @@ const Home = () => {
     setShowScrollToBottom(false);
     setUnreadSeparatorMessageId(null);
   }, []);
+
+  useEffect(() => {
+    activeChatRef.current = activeChat;
+  }, [activeChat]);
+  useEffect(() => {
+    olderPaginationRef.current = olderPagination;
+  }, [olderPagination]);
+
+  /**
+   * Infinite-scroll "load older messages". Preserves scroll position by
+   * measuring scrollHeight before/after prepending, so loading history
+   * doesn't visually jump the viewport (a common infinite-scroll bug).
+   */
+  const loadOlderMessages = useCallback(async () => {
+    const chat = activeChatRef.current;
+    if (!chat || loadingOlderRef.current) return;
+    const conversationId = String(chat._id);
+    const pageInfo = olderPaginationRef.current[conversationId];
+    if (!pageInfo || !pageInfo.hasMore || !pageInfo.oldestCursor) return;
+
+    const user = JSON.parse(localStorage.getItem("user") || "null");
+    const userId = user?.id || user?._id;
+    if (!userId) return;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const container = messagesContainerRef.current;
+    const prevScrollHeight = container ? container.scrollHeight : 0;
+
+    try {
+      const isGroup = !!chat.isGroup;
+      const res = isGroup
+        ? await getGroupMessages(chat._id, { limit: 50, before: pageInfo.oldestCursor })
+        : await getMessages(userId, chat._id, { limit: 50, before: pageInfo.oldestCursor });
+
+      const rawMessages = res.data?.messages || [];
+      const formatted = rawMessages.map((raw) => {
+        const m = raw.encrypted ? decryptMessageObject(raw) : raw;
+        const msgType = m.messageType || m.type || "text";
+        const isMedia = ["image", "video", "file", "link", "voice"].includes(msgType);
+        const fileUrl = m.fileUrl || m.file || null;
+        const isOwn = String(m.sender?._id || m.sender) === String(userId);
+
+        if (isMedia && fileUrl) {
+          return {
+            _id: m._id != null ? String(m._id) : m._id,
+            clientMessageId: m.clientMessageId,
+            type: msgType,
+            file: fileUrl,
+            duration: m.duration,
+            text: m.text || m.fileName || "",
+            isOwn,
+            time: new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            createdAt: m.createdAt,
+            status: m.status ?? (isOwn ? "sent" : "seen"),
+            seenAt: m.seenAt,
+            reactions: m.reactions || [],
+            forwarded: m.forwarded,
+            deletedForEveryone: m.deletedForEveryone,
+          };
+        }
+
+        const currentText = m.edited
+          ? (m.text ?? "")
+          : isOwn
+            ? (m.originalText ?? m.text ?? "")
+            : (m.translatedText || m.text || "");
+        return {
+          _id: m._id != null ? String(m._id) : m._id,
+          clientMessageId: m.clientMessageId,
+          type: "text",
+          text: currentText,
+          originalText: m.originalText ?? m.text ?? "",
+          translatedText: isOwn ? (m.originalText ?? m.text ?? "") : (m.translatedText ?? m.text ?? ""),
+          detectedLanguage: m.detectedLanguage,
+          isOwn,
+          time: new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: m.createdAt,
+          status: m.status ?? (isOwn ? "sent" : "seen"),
+          seenAt: m.seenAt,
+          reactions: m.reactions || [],
+          forwarded: m.forwarded,
+          deletedForEveryone: m.deletedForEveryone,
+          edited: !!m.edited,
+          editedAt: m.editedAt ?? null,
+        };
+      });
+
+      setMessages((prev) => ({
+        ...prev,
+        [conversationId]: mergeMessageLists(formatted, prev[conversationId] || []),
+      }));
+      setOlderPagination((prev) => ({
+        ...prev,
+        [conversationId]: { hasMore: !!res.data?.hasMore, oldestCursor: res.data?.oldestCursor || null },
+      }));
+
+      // Restore scroll position so prepending older messages doesn't jump
+      // the view (classic infinite-scroll-upward pitfall).
+      requestAnimationFrame(() => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        const newScrollHeight = el.scrollHeight;
+        el.scrollTop = newScrollHeight - prevScrollHeight + el.scrollTop;
+      });
+    } catch (err) {
+      console.error("Failed to load older messages:", err);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [mergeMessageLists]);
 
   /* LOAD RECENT CHATS - Users with existing messages */
   const loadRecentChats = async () => {
@@ -711,6 +839,25 @@ const Home = () => {
       if (isFullMessage) {
         const m = message;
         const isOwn = String(m.sender?._id || m.sender || senderId) === String(userId);
+
+        if (m.encrypted) {
+          if (isOwn) {
+            // We already know what we typed - and nacl.box can't be
+            // self-decrypted with the sender's own public key (it needs
+            // the RECIPIENT's public key + our secret key, see e2ee.js) -
+            // so leave these undefined and let the reconciliation below
+            // fall back to the existing optimistic bubble text (`x.text`).
+            m.text = undefined;
+            m.originalText = undefined;
+            m.translatedText = undefined;
+          } else {
+            const decrypted = decryptMessageObject(m);
+            m.text = decrypted.text;
+            m.originalText = decrypted.originalText;
+            m.translatedText = decrypted.translatedText;
+          }
+        }
+
         const mid = m._id != null ? String(m._id) : null;
         const cmid = m.clientMessageId != null ? String(m.clientMessageId) : null;
         const createdAtIso = m.createdAt || new Date().toISOString();
@@ -958,10 +1105,18 @@ const Home = () => {
         // Check if it's a group chat
         const isGroup = activeChat.isGroup || false;
         const res = isGroup
-          ? await getGroupMessages(activeChat._id)
-          : await getMessages(userId, activeChat._id);
+          ? await getGroupMessages(activeChat._id, { limit: 50 })
+          : await getMessages(userId, activeChat._id, { limit: 50 });
 
-        const formatted = res.data.map((m) => {
+        const page = isGroup ? res.data : res.data; // both now return {messages, hasMore, oldestCursor}
+        const rawMessages = Array.isArray(page) ? page : page.messages || [];
+        setOlderPagination((prev) => ({
+          ...prev,
+          [conversationId]: { hasMore: !!page?.hasMore, oldestCursor: page?.oldestCursor || null },
+        }));
+
+        const formatted = rawMessages.map((raw) => {
+          const m = raw.encrypted ? decryptMessageObject(raw) : raw;
           const msgType = m.messageType || m.type || "text";
           const isMedia = ["image", "video", "file", "link", "voice"].includes(msgType);
           const fileUrl = m.fileUrl || m.file || null;
@@ -1330,18 +1485,36 @@ const Home = () => {
       [conversationId]: [...(prev[conversationId] || []), newMessage],
     }));
 
-    // Play send sound (respecting setting)
-    playSendSound();
-
     setSendingMessage(true);
     try {
+      // E2EE (1:1 chats only - see utils/e2ee.js). If both participants
+      // have a public key on file, encrypt client-side before this ever
+      // leaves the device; the server stores/relays ciphertext only.
+      let e2eePayload = {};
+      if (!isGroup) {
+        try {
+          const enc = await encryptForPeer(activeChat._id, msg);
+          if (enc) {
+            e2eePayload = {
+              encrypted: true,
+              ciphertext: enc.ciphertext,
+              nonce: enc.nonce,
+              senderE2eePublicKey: enc.senderPublicKey,
+            };
+          }
+        } catch (e) {
+          console.warn("E2EE encryption unavailable, sending unencrypted:", e);
+        }
+      }
+
       const res = await saveMessage({
         sender: userId,
         receiver: isGroup ? undefined : activeChat._id,
         group: isGroup ? activeChat._id : undefined,
-        text: msg,
+        text: e2eePayload.encrypted ? undefined : msg,
         clientMessageId,
         senderDeviceId: deviceId,
+        ...e2eePayload,
       });
       const savedMessage = res?.data;
       if (savedMessage?._id) {
@@ -1352,9 +1525,12 @@ const Home = () => {
               return {
                 ...m,
                 _id: savedMessage._id,
-                text: savedMessage.translatedText ?? savedMessage.text ?? m.text,
-                originalText: savedMessage.originalText ?? m.originalText,
-                translatedText: savedMessage.translatedText ?? m.translatedText,
+                // Encrypted messages: the server never has plaintext, so
+                // keep what the sender actually typed (m.text) instead of
+                // overwriting it with the server's blank placeholder.
+                text: savedMessage.encrypted ? m.text : (savedMessage.translatedText ?? savedMessage.text ?? m.text),
+                originalText: savedMessage.encrypted ? m.text : (savedMessage.originalText ?? m.originalText),
+                translatedText: savedMessage.encrypted ? m.text : (savedMessage.translatedText ?? m.translatedText),
                 detectedLanguage: savedMessage.detectedLanguage ?? m.detectedLanguage,
                 status: savedMessage.status ?? "sent",
                 createdAt: savedMessage.createdAt ?? m.createdAt,
@@ -1790,6 +1966,12 @@ const Home = () => {
           }
         }
         setFloatingDateLabel(atBottom ? "" : label);
+
+        // Infinite scroll upward: fetch the next page of history once the
+        // user gets near the top (see loadOlderMessages below).
+        if (el.scrollTop < 120) {
+          loadOlderMessages();
+        }
       });
     };
 
@@ -1834,9 +2016,7 @@ const Home = () => {
     formData.append("messageType", messageType);
 
     try {
-      const res = await axios.post("/messages/upload", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await axios.post("/messages/upload", formData);
       handleMediaMessage(res.data);
     } catch (err) {
       console.error("Drop upload failed", err);
@@ -1914,7 +2094,7 @@ const Home = () => {
                 )}
               </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto pb-2">
+            <div className="flex-1 min-h-0 overflow-y-auto pb-20 lg:pb-2">
               {activeView === "chats" && (loadingRecentChats || loadingGroups) ? (
                 <div className="flex items-center justify-center py-8">
                   <svg className="animate-spin h-8 w-8 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -2118,13 +2298,20 @@ const Home = () => {
                       }}
                       onSearchSelectMessage={handleSearchSelectMessage}
                       searchMessagesList={messages[String(activeChat._id)] ?? []}
-                      onClose={() => setActiveChat(null)}
                     />
 
                     <div
                       ref={messagesContainerRef}
                       className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-3 sm:py-4 md:py-5 px-2 sm:px-3 md:px-4 space-y-2 sm:space-y-2.5 scroll-smooth"
                     >
+                      {loadingOlder && (
+                        <div className="flex items-center justify-center py-2">
+                          <svg className="animate-spin h-5 w-5 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                        </div>
+                      )}
                       {loadingMessages ? (
                         <div className="flex items-center justify-center py-8">
                           <svg className="animate-spin h-8 w-8 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -2396,7 +2583,7 @@ const Home = () => {
                   )}
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-y-auto mt-1 pb-2">
+                <div className="flex-1 min-h-0 overflow-y-auto mt-1 pb-20 lg:pb-2">
                   {activeView === "chats" && (loadingRecentChats || loadingGroups) ? (
                     <div className="flex items-center justify-center py-8">
                       <svg className="animate-spin h-8 w-8 text-emerald-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -2621,8 +2808,16 @@ const Home = () => {
       {/* Mobile/Tablet Bottom Navigation — just Chats + Menu. Everything else
           (Contacts, Calls, Discover, Alerts, Settings, Profile) lives in the
           Menu sheet below, since those are occasional destinations, not
-          something you tap several times a minute like the chat list. */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-neutral-800 border-t border-gray-200 dark:border-neutral-700 py-1.5 pb-[env(safe-area-inset-bottom)]">
+          something you tap several times a minute like the chat list.
+          Hidden while a chat is open on mobile: previously this stayed
+          fixed at the bottom of the screen at all times, sitting directly
+          on top of the message compose bar (both are "fixed bottom-0"
+          relative to the viewport, so the compose bar being last in the
+          flex column didn't stop the overlap). Every major chat app hides
+          its tab bar once you're inside a conversation for the same
+          reason. */}
+      {!activeChat && (
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-neutral-800 border-t border-gray-200 dark:border-neutral-700 py-1.5 pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-center justify-around px-2">
           <button
             type="button"
@@ -2650,6 +2845,7 @@ const Home = () => {
           </button>
         </div>
       </div>
+      )}
 
       {/* Menu bottom sheet */}
       <AnimatePresence>

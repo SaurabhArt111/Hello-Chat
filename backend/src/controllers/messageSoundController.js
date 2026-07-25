@@ -54,7 +54,7 @@ export const updateMessageSound = async (req, res) => {
     const updated = await MessageSoundSetting.findOneAndUpdate(
       { userId },
       { userId, messageSound },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
     return res.json({

@@ -6,7 +6,38 @@ import { translateTo } from "../utils/translate.js";
 import FriendRequest from "../models/FriendRequest.js";
 import Friend from "../models/Friend.js";
 import Group from "../models/Group.js";
+import Conversation from "../models/Conversation.js";
 import { isBlocked } from "./blockController.js";
+
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
+
+/**
+ * Bump the denormalized conversation preview + unread counter. Called after
+ * every successful 1:1 message save so the chat list never has to scan the
+ * Message collection (see models/Conversation.js).
+ */
+async function touchConversationOnNewMessage(conversationId, message, receiverId) {
+  try {
+    await Conversation.updateOne(
+      { _id: conversationId },
+      {
+        $set: {
+          lastMessage: {
+            text: message.encrypted ? "" : message.text || "",
+            messageType: message.messageType || message.type || "text",
+            senderId: message.sender,
+            encrypted: !!message.encrypted,
+          },
+          lastMessageAt: message.createdAt || new Date(),
+        },
+        $inc: { [`unreadCount.${String(receiverId)}`]: 1 },
+      }
+    );
+  } catch (err) {
+    console.error("touchConversationOnNewMessage error:", err);
+  }
+}
 
 const langMap = {
   English: "en",
@@ -32,12 +63,21 @@ export const saveMessage = async (req, res) => {
       file = null,
       clientMessageId,
       senderDeviceId,
+      // E2EE (1:1 only): when the client sends `encrypted: true`, `text` is
+      // ignored/blank and the real content is ciphertext+nonce. The server
+      // never sees plaintext for these messages, so it cannot translate
+      // them - see Conversation.e2eeEnabled.
+      encrypted,
+      ciphertext,
+      nonce,
+      senderE2eePublicKey,
     } = req.body;
 
     // Validate input - must have either receiver OR group
-    if (!sender || (!receiver && !group) || (!text && !file)) {
+    const hasContent = !!text || !!file || (encrypted && ciphertext);
+    if (!sender || (!receiver && !group) || !hasContent) {
       console.error("Missing required fields");
-      return res.status(400).json({ message: "Sender, receiver/group, and content (text or file) are required" });
+      return res.status(400).json({ message: "Sender, receiver/group, and content (text, file, or ciphertext) are required" });
     }
 
     // Validate ObjectId format
@@ -60,6 +100,7 @@ export const saveMessage = async (req, res) => {
 
     let groupDoc = null;
     let receiverUser = null;
+    let conversation = null;
 
     // Handle group messages
     if (group) {
@@ -110,15 +151,24 @@ export const saveMessage = async (req, res) => {
         console.error("Receiver user not found");
         return res.status(404).json({ message: "Receiver not found" });
       }
+
+      conversation = await Conversation.findOrCreateDirect(sender, receiver);
+      if (encrypted && !conversation.e2eeEnabled) {
+        await Conversation.updateOne({ _id: conversation._id }, { $set: { e2eeEnabled: true } });
+      }
     }
 
-    // Translation logic
+    // Translation logic - skipped entirely for E2EE messages, since the
+    // server never has plaintext to translate (that's the point of E2EE).
     let targetLangCode = "en";
     let detectedLanguage = "auto";
     let translatedText = text;
     let groupTranslations = [];
 
-    if (group && groupDoc && type === "text" && text) {
+    if (encrypted) {
+      detectedLanguage = undefined;
+      translatedText = undefined;
+    } else if (group && groupDoc && type === "text" && text) {
       // GROUP MESSAGE: Translate for each member
       try {
         // Detect language once
@@ -199,18 +249,27 @@ export const saveMessage = async (req, res) => {
       sender: new mongoose.Types.ObjectId(sender),
       receiver: receiver ? new mongoose.Types.ObjectId(receiver) : undefined,
       group: group ? new mongoose.Types.ObjectId(group) : undefined,
-      text,
+      conversationId: conversation ? conversation._id : undefined,
+      text: encrypted ? "" : text,
       type,
       file,
-      originalText: type === "text" ? text : undefined,
+      encrypted: !!encrypted,
+      ciphertext: encrypted ? ciphertext : undefined,
+      nonce: encrypted ? nonce : undefined,
+      senderE2eePublicKey: encrypted ? senderE2eePublicKey : undefined,
+      originalText: !encrypted && type === "text" ? text : undefined,
       detectedLanguage,
-      translatedText: group ? text : translatedText, // For groups, keep original in translatedText, use groupTranslations
+      translatedText: encrypted ? undefined : group ? text : translatedText,
       groupTranslations: group && groupTranslations.length > 0 ? groupTranslations : undefined,
       ...(clientMessageId && typeof clientMessageId === "string" ? { clientMessageId } : {}),
       ...(senderDeviceId && typeof senderDeviceId === "string" ? { senderDeviceId } : {}),
     });
 
     const savedMessage = await message.save();
+
+    if (conversation) {
+      await touchConversationOnNewMessage(conversation._id, savedMessage, receiver);
+    }
 
     return res.status(201).json(savedMessage);
   } catch (err) {
@@ -318,43 +377,87 @@ export const syncMessages = async (req, res) => {
   }
 };
 
-/* GET CHAT HISTORY */
+/**
+ * GET CHAT HISTORY - cursor-paginated.
+ *
+ * Previously this loaded the ENTIRE 1:1 message history in one query with
+ * no limit at all - fine for a demo, but it means every chat open gets
+ * slower forever and eventually falls over once a conversation has a few
+ * thousand messages. Now it returns the most recent `limit` messages (or
+ * the `limit` messages immediately before the `before` cursor for
+ * "load older" / infinite scroll), using the {conversationId, createdAt}
+ * index so it stays fast regardless of how long the conversation is.
+ *
+ * Response shape: { messages: [...oldest→newest], hasMore, oldestCursor }
+ */
 export const getMessages = async (req, res) => {
   try {
     const { user1, user2 } = req.params;
+    const currentUserId = req.user ? String(req.user) : null;
 
-    // Validate input
     if (!user1 || !user2) {
       return res.status(400).json({ message: "Both user IDs are required" });
     }
-
-    // Validate ObjectId format
     if (!mongoose.Types.ObjectId.isValid(user1) || !mongoose.Types.ObjectId.isValid(user2)) {
       return res.status(400).json({ message: "Invalid user ID format" });
     }
 
-    // Fetch messages between the two users (1-on-1 only)
-    let messages = await Message.find({
-      $or: [
-        { sender: user1, receiver: user2 },
-        { sender: user2, receiver: user1 },
-      ],
-      group: { $exists: false }, // Only 1-on-1 messages
+    const limit = Math.min(
+      Math.max(parseInt(String(req.query.limit || DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE, 1),
+      MAX_PAGE_SIZE
+    );
+    const before = req.query.before; // ISO date or message _id timestamp - fetch messages older than this
+
+    const conversation = await Conversation.findOne({
+      participants: { $all: [user1, user2], $size: 2 },
     })
-      .sort({ createdAt: 1 })
+      .select("_id")
       .lean();
 
+    let query;
+    if (conversation) {
+      query = { conversationId: conversation._id };
+    } else {
+      // Conversation not created yet (e.g. pre-migration data, or no
+      // messages sent yet) - fall back to the legacy $or lookup.
+      query = {
+        $or: [
+          { sender: user1, receiver: user2 },
+          { sender: user2, receiver: user1 },
+        ],
+        group: { $exists: false },
+      };
+    }
+
+    if (before) {
+      const beforeDate = /^\d+$/.test(String(before)) ? new Date(Number(before)) : new Date(String(before));
+      if (!Number.isNaN(beforeDate.getTime())) {
+        query.createdAt = { $lt: beforeDate };
+      }
+    }
+
+    // Fetch newest-first (indexed), then reverse to oldest→newest for the UI.
+    let page = await Message.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit + 1) // fetch one extra to know if there's more
+      .lean();
+
+    const hasMore = page.length > limit;
+    if (hasMore) page = page.slice(0, limit);
+    page.reverse();
+
     // Exclude messages "deleted for me" for the current user
-    const currentUserId = req.user ? String(req.user) : null;
     if (currentUserId) {
-      messages = messages.filter(
-        (m) =>
-          !m.deletedFor ||
-          !m.deletedFor.some((uid) => String(uid) === currentUserId)
+      page = page.filter(
+        (m) => !m.deletedFor || !m.deletedFor.some((uid) => String(uid) === currentUserId)
       );
     }
 
-    return res.json(messages);
+    return res.json({
+      messages: page,
+      hasMore,
+      oldestCursor: page.length ? page[0].createdAt : null,
+    });
   } catch (err) {
     console.error("GET MESSAGES ERROR:", err);
     return res.status(500).json({
@@ -364,7 +467,7 @@ export const getMessages = async (req, res) => {
   }
 };
 
-/* GET GROUP MESSAGES */
+/* GET GROUP MESSAGES - cursor-paginated (see getMessages for why) */
 export const getGroupMessages = async (req, res) => {
   try {
     const { groupId } = req.params;
@@ -391,18 +494,35 @@ export const getGroupMessages = async (req, res) => {
       return res.status(403).json({ message: "You are not a member of this group" });
     }
 
-    // Fetch group messages
-    let messages = await Message.find({
-      group: groupId,
-    })
+    const limit = Math.min(
+      Math.max(parseInt(String(req.query.limit || DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE, 1),
+      MAX_PAGE_SIZE
+    );
+    const before = req.query.before;
+
+    const query = { group: groupId };
+    if (before) {
+      const beforeDate = /^\d+$/.test(String(before)) ? new Date(Number(before)) : new Date(String(before));
+      if (!Number.isNaN(beforeDate.getTime())) {
+        query.createdAt = { $lt: beforeDate };
+      }
+    }
+
+    // Fetch group messages (newest-first via the {group, createdAt} index, then reverse)
+    let page = await Message.find(query)
       .populate("sender", "username avatar")
       .populate("groupTranslations.userId", "username")
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
+      .limit(limit + 1)
       .lean();
+
+    const hasMore = page.length > limit;
+    if (hasMore) page = page.slice(0, limit);
+    page.reverse();
 
     // Exclude messages "deleted for me" for the current user
     if (userId) {
-      messages = messages.filter(
+      page = page.filter(
         (m) =>
           !m.deletedFor ||
           !m.deletedFor.some((uid) => String(uid) === String(userId))
@@ -410,9 +530,9 @@ export const getGroupMessages = async (req, res) => {
     }
 
     // For each message, add user-specific translation
-    messages = messages.map((m) => {
+    page = page.map((m) => {
       const isOwn = String(m.sender._id || m.sender) === String(userId);
-      
+
       // For sender, always show original
       if (isOwn) {
         return {
@@ -442,7 +562,11 @@ export const getGroupMessages = async (req, res) => {
       };
     });
 
-    return res.json(messages);
+    return res.json({
+      messages: page,
+      hasMore,
+      oldestCursor: page.length ? page[0].createdAt : null,
+    });
   } catch (err) {
     console.error("GET GROUP MESSAGES ERROR:", err);
     return res.status(500).json({
@@ -452,7 +576,7 @@ export const getGroupMessages = async (req, res) => {
   }
 };
 
-/* GET RECENT CHATS - Users with existing messages, sorted by last message time */
+/* GET RECENT CHATS - Users with existing conversations, sorted by last activity */
 export const getRecentChats = async (req, res) => {
   try {
     const currentUser = req.user;
@@ -461,72 +585,46 @@ export const getRecentChats = async (req, res) => {
       return res.status(401).json({ message: "Not authorized" });
     }
 
-    // Find all messages where currentUser is sender or receiver (1-on-1 only, no groups)
-    const messages = await Message.find({
-      $or: [{ sender: currentUser }, { receiver: currentUser }],
-      group: { $exists: false }, // Only 1-on-1 messages
-    })
-      .select("sender receiver createdAt text messageType type")
-      .sort({ createdAt: -1 })
+    // Single indexed query against the denormalized Conversation collection
+    // (see models/Conversation.js) instead of scanning every message the
+    // user has ever sent/received and grouping in JS.
+    const conversations = await Conversation.find({ participants: currentUser })
+      .sort({ lastMessageAt: -1 })
+      .limit(200)
       .lean();
 
-    // Group by otherUserId and get the latest message for each conversation
-    const chatMap = new Map();
-
-    messages.forEach((msg) => {
-      const senderStr = String(msg.sender);
-      const receiverStr = String(msg.receiver);
-      const currentStr = String(currentUser);
-
-      // Determine the other user (must be a friend)
-      const otherUserId = senderStr === currentStr ? receiverStr : senderStr;
-
-      // Only keep the most recent message per conversation
-      if (!chatMap.has(otherUserId)) {
-        chatMap.set(otherUserId, {
-          userId: otherUserId,
-          lastMessage: msg.text || "",
-          lastMessageType: msg.messageType || msg.type || "text",
-          lastMessageTime: msg.createdAt,
-        });
-      } else {
-        const existing = chatMap.get(otherUserId);
-        if (new Date(msg.createdAt) > new Date(existing.lastMessageTime)) {
-          existing.lastMessage = msg.text || "";
-          existing.lastMessageType = msg.messageType || msg.type || "text";
-          existing.lastMessageTime = msg.createdAt;
-        }
-      }
-    });
-
-    // Convert to array and sort by lastMessageTime DESC
-    const recentChats = Array.from(chatMap.values()).sort(
-      (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
+    const otherUserIds = conversations.map(
+      (c) => c.participants.find((p) => String(p) !== String(currentUser)) || c.participants[0]
     );
 
-    const userIds = recentChats.map((chat) => chat.userId);
-    const users = await User.find({ _id: { $in: userIds } })
+    const users = await User.find({ _id: { $in: otherUserIds } })
       .select("username avatar email bio")
       .lean();
+    const userMap = new Map(users.map((u) => [String(u._id), u]));
 
-    const userMap = new Map();
-    users.forEach((u) => {
-      userMap.set(String(u._id), u);
-    });
+    const result = conversations.map((c) => {
+      const otherId = String(
+        c.participants.find((p) => String(p) !== String(currentUser)) || c.participants[0]
+      );
+      const user = userMap.get(otherId);
+      const unread = (c.unreadCount && (c.unreadCount.get ? c.unreadCount.get(String(currentUser)) : c.unreadCount[String(currentUser)])) || 0;
 
-    const result = recentChats.map((chat) => {
-      const user = userMap.get(chat.userId);
+      const base = {
+        conversationId: String(c._id),
+        lastMessage: c.lastMessage?.encrypted ? "🔒 Encrypted message" : c.lastMessage?.text || "",
+        lastMessageType: c.lastMessage?.messageType || "text",
+        lastMessageTime: c.lastMessageAt,
+        unreadCount: unread,
+      };
 
       if (!user) {
         return {
-          _id: chat.userId,
+          _id: otherId,
           username: "Deleted User",
           avatar: "/default-avatar.png",
           email: "",
           bio: "",
-          lastMessage: chat.lastMessage,
-          lastMessageType: chat.lastMessageType,
-          lastMessageTime: chat.lastMessageTime,
+          ...base,
         };
       }
 
@@ -536,9 +634,7 @@ export const getRecentChats = async (req, res) => {
         avatar: user.avatar,
         email: user.email,
         bio: user.bio,
-        lastMessage: chat.lastMessage,
-        lastMessageType: chat.lastMessageType,
-        lastMessageTime: chat.lastMessageTime,
+        ...base,
       };
     });
 

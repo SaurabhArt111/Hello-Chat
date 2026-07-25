@@ -98,9 +98,7 @@ const GroupProfilePanel = ({ groupId, onClose, onGroupUpdated, onGroupDisbanded 
       const formData = new FormData();
       formData.append("logo", logoFile);
 
-      const res = await axios.post(`/groups/${groupId}/logo`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await axios.post(`/groups/${groupId}/logo`, formData);
 
       setGroup(res.data.group);
       setLogoFile(null);

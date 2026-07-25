@@ -1,27 +1,31 @@
+// Notification sound preference: only the RECEIVE sound plays (a "sent"
+// sound is chatty/annoying at scale and every major chat app has dropped
+// it - WhatsApp, iMessage, Telegram all only sound on incoming messages).
 let messageSoundEnabled = true;
 
 export const setMessageSoundEnabled = (value) => {
   messageSoundEnabled = !!value;
 };
 
-const sendAudio =
-  typeof Audio !== "undefined"
-    ? new Audio("/sounds/send.mp3")
-    : null;
+const receiveAudio =
+  typeof Audio !== "undefined" ? new Audio("/sounds/receive.mp3") : null;
 
-// Keep a no-op receive handler for now to avoid double/queued sounds issues.
-// You can later wire this up again once you're happy with browser autoplay behavior.
-export const playSendSound = () => {
-  if (!messageSoundEnabled || !sendAudio) return;
+/**
+ * Intentionally a no-op: HelloChat no longer plays a sound when the local
+ * user sends a message (matches WhatsApp/iMessage/Telegram - a "sent"
+ * chime for your own action adds noise without information). Kept as an
+ * exported function (rather than deleted) so call sites don't need to be
+ * touched one-by-one; it simply does nothing.
+ */
+export const playSendSound = () => {};
+
+/** Plays only when a message is RECEIVED from someone else. */
+export const playReceiveSound = () => {
+  if (!messageSoundEnabled || !receiveAudio) return;
   try {
-    sendAudio.currentTime = 0;
-    sendAudio.play().catch(() => {});
+    receiveAudio.currentTime = 0;
+    receiveAudio.play().catch(() => {});
   } catch {
-    // ignore
+    // ignore - autoplay restrictions before first user interaction, etc.
   }
 };
-
-export const playReceiveSound = () => {
-  // intentionally left blank (no receive sound)
-};
-

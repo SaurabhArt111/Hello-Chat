@@ -58,7 +58,7 @@ export const updateProfilePhotoPrivacy = async (req, res) => {
     const updated = await ProfilePhotoPrivacy.findOneAndUpdate(
       { userId },
       { userId, profilePhoto },
-      { new: true, upsert: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, setDefaultsOnInsert: true }
     ).lean();
 
     return res.json({

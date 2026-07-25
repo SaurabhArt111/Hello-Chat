@@ -21,6 +21,7 @@ export default function CallScreen() {
     localStream,
     remoteStream,
     incomingCaller,
+    recipientOffline,
     isMuted,
     isVideoOff,
     toggleMute,
@@ -151,6 +152,12 @@ export default function CallScreen() {
                   </div>
                   <h1 style={callTheme.typography.callerName}>{name}</h1>
                   <p style={callTheme.typography.status}>Calling{dots}</p>
+                  {recipientOffline && (
+                    <div className="mt-3 flex items-center gap-2 rounded-full bg-black/30 px-3 py-1.5 text-sm text-white/80">
+                      <span className="h-2 w-2 rounded-full bg-gray-400" />
+                      <span>Offline &middot; we've sent them a notification</span>
+                    </div>
+                  )}
                 </>
               ) : (
                 <>

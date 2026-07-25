@@ -181,7 +181,7 @@ export const processScheduledMessages = async (io) => {
             updatedAt: now,
           },
         },
-        { new: true }
+        { returnDocument: "after" }
       )
         .populate("sender", "username avatar")
         .populate("receiver", "username avatar")

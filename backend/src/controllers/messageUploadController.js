@@ -1,7 +1,8 @@
 import mongoose from "mongoose";
 import Message from "../models/Message.js";
+import Conversation from "../models/Conversation.js";
 import FriendRequest from "../models/FriendRequest.js";
-import { maybeCompressImageFile } from "../utils/fileStorage.js";
+import { saveMessageMediaBuffer } from "../utils/mediaStorage.js";
 import { buildFileUrl } from "../utils/buildFileUrl.js";
 
 // POST /api/messages/upload
@@ -23,6 +24,8 @@ export const uploadFile = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(senderId)) {
       return res.status(400).json({ message: "Invalid sender ID" });
     }
+
+    let conversation = null;
 
     if (isGroup) {
       if (!mongoose.Types.ObjectId.isValid(groupId)) {
@@ -51,6 +54,7 @@ export const uploadFile = async (req, res) => {
       if (!friendship) {
         return res.status(403).json({ message: "You can only send media to friends" });
       }
+      conversation = await Conversation.findOrCreateDirect(senderId, receiverId);
     }
 
     let type = "file";
@@ -58,39 +62,67 @@ export const uploadFile = async (req, res) => {
     else if (messageType === "video") type = "video";
     else if (messageType === "voice") type = "voice";
 
-    // The client already compresses images/video before upload (see
-    // frontend/src/utils/compressFile.js). This is a server-side safety net
-    // in case the client is old/bypassed: images get re-compressed here too.
-    // PDFs, audio, and video are left as-is (video re-encoding needs a real
-    // media pipeline and is out of scope for a lightweight Node backend).
-    let finalFilename = req.file.filename;
-    if (type === "image") {
-      const compressedName = await maybeCompressImageFile(
-        req.file.path,
-        req.file.mimetype
-      );
-      if (compressedName) finalFilename = compressedName;
-    }
+    // Upload to Cloudinary (or local-disk fallback in dev - see
+    // utils/mediaStorage.js). Images are re-compressed server-side as a
+    // safety net; the client already compresses before upload.
+    const saved = await saveMessageMediaBuffer(req.file.buffer, {
+      mimetype: req.file.mimetype,
+      originalname: req.file.originalname,
+    });
 
-    const relativePath = `/uploads/${finalFilename}`;
-    const fileUrl = buildFileUrl(req, relativePath);
+    let fileUrl = saved.url;
+    if (fileUrl && fileUrl.startsWith("/uploads/")) {
+      fileUrl = buildFileUrl(req, fileUrl);
+    }
     const fileName = req.file.originalname;
     const fileSize = `${Math.round(req.file.size / 1024)} KB`;
+    // Voice notes: trust the client-measured duration if it's a real,
+    // finite number (this is exactly what fixes the "Infinity:NaN" bug -
+    // we now validate here AND on the client before ever rendering it).
+    const numericDuration = Number(duration);
+    const safeDuration = Number.isFinite(numericDuration) && numericDuration > 0 ? numericDuration : undefined;
 
     const message = new Message({
       sender: senderId,
       receiver: isGroup ? undefined : receiverId,
       group: isGroup ? groupId : undefined,
+      conversationId: conversation ? conversation._id : undefined,
       messageType: type,
       type: type,
       fileUrl,
       fileName,
       fileSize,
-      duration: duration ? Number(duration) : undefined,
+      filePublicId: saved.publicId,
+      duration: safeDuration,
+      attachments: [
+        {
+          url: fileUrl,
+          publicId: saved.publicId,
+          mimeType: req.file.mimetype,
+          fileName,
+          fileSize: req.file.size,
+          width: saved.width,
+          height: saved.height,
+          duration: safeDuration ?? saved.duration,
+        },
+      ],
       text: typeof text === "string" ? text.slice(0, 2000) : "",
     });
 
     const savedMessage = await message.save();
+
+    if (conversation) {
+      await Conversation.updateOne(
+        { _id: conversation._id },
+        {
+          $set: {
+            lastMessage: { text: `📎 ${type}`, messageType: type, senderId, encrypted: false },
+            lastMessageAt: savedMessage.createdAt || new Date(),
+          },
+          $inc: { [`unreadCount.${String(receiverId)}`]: 1 },
+        }
+      ).catch(() => {});
+    }
 
     try {
       const io = req.app.get("io");
@@ -142,4 +174,3 @@ export const uploadFile = async (req, res) => {
     return res.status(500).json({ error: err.message });
   }
 };
-
