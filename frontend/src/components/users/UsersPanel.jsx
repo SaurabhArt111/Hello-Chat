@@ -168,6 +168,26 @@ const UsersPanel = ({ onClose }) => {
     }
   };
 
+  const handleRejectPending = async (user) => {
+    const { requestId, _id: userId } = user;
+    if (!requestId) return;
+    try {
+      setSending(userId);
+      await rejectRequest(requestId);
+      setUsers((prev) =>
+        prev.map((u) =>
+          String(u._id) === String(userId)
+            ? { ...u, status: "none", requestId: null }
+            : u
+        )
+      );
+    } catch (err) {
+      alert(err.response?.data?.message || "Failed to reject");
+    } finally {
+      setSending(null);
+    }
+  };
+
   const renderAction = (user) => {
     const { status } = user;
     if (status === "self") {
@@ -213,7 +233,7 @@ const UsersPanel = ({ onClose }) => {
             Accept
           </button>
           <button
-            onClick={() => handleCancel(user)}
+            onClick={() => handleRejectPending(user)}
             disabled={sending === user._id}
             className="bg-red-500 hover:bg-red-600 text-white text-xs px-4 py-2 rounded-xl disabled:opacity-50 flex-shrink-0 font-medium shadow-md hover:shadow-lg transition-all duration-200 active:scale-95"
           >
@@ -236,7 +256,7 @@ const UsersPanel = ({ onClose }) => {
   };
 
   return (
-    <div className="w-full md:w-[360px] h-full">
+    <div className="w-full md:w-[340px] h-full">
       <div className="w-full h-full overflow-y-auto bg-white dark:bg-neutral-800/95 backdrop-blur-sm border-l border-gray-200 dark:border-neutral-700 p-4 md:p-5 flex flex-col">
 
         {/* Header */}

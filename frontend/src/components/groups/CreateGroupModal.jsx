@@ -4,7 +4,6 @@ import { X, Users, Clock, Upload } from "lucide-react";
 import { createGroup } from "../../api/groups";
 import { useToastContext } from "../../context/ToastContext";
 import Avatar from "../common/Avatar";
-import axios from "../../api/axios";
 import { FiCheck } from "react-icons/fi";
 
 const CreateGroupModal = ({ isOpen, onClose, friends, onGroupCreated }) => {

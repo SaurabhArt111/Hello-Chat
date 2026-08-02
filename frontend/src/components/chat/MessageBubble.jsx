@@ -232,7 +232,12 @@ const MessageBubble = ({
                 <div className="max-w-[90%]">
                   {renderTextWithLinks(text, highlightQuery)}
                   {edited && (
-                    <span className="text-[10px] opacity-80 italic ml-1">(edited)</span>
+                    <span
+                      className="text-[10px] opacity-80 italic ml-1"
+                      title={editedAt ? `Edited at ${new Date(editedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : undefined}
+                    >
+                      (edited)
+                    </span>
                   )}
                 </div>
               ) : null}

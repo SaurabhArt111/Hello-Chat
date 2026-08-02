@@ -226,6 +226,7 @@ const AdminReports = () => {
                 <tr>
                   <th className="w-10 px-4 py-3" />
                   <th className="px-4 py-3 text-left">Reporter</th>
+                  <th className="px-4 py-3 text-left">Sender</th>
                   <th className="px-4 py-3 text-left">Message</th>
                   <th className="px-4 py-3 text-left">Reason</th>
                   <th className="px-4 py-3 text-left">Severity</th>
@@ -258,6 +259,9 @@ const AdminReports = () => {
                         </td>
                         <td className="px-4 py-2">
                           {r.reporterId?.username || "Unknown"}
+                        </td>
+                        <td className="px-4 py-2">
+                          {senderName}
                         </td>
                         <td className="px-4 py-2 max-w-xs truncate" title={reportedText}>
                           {reportedText}
@@ -327,7 +331,7 @@ const AdminReports = () => {
                       </tr>
                       {isExpanded && (
                         <tr className="border-t border-gray-100 dark:border-neutral-700 bg-gray-50/50 dark:bg-neutral-700/30">
-                          <td colSpan={7} className="px-4 py-4">
+                          <td colSpan={8} className="px-4 py-4">
                             <div className="space-y-2 text-sm">
                               <div>
                                 <span className="font-medium text-gray-600 dark:text-neutral-400">

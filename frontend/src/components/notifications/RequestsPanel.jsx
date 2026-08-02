@@ -123,7 +123,7 @@ const RequestsPanel = ({ onClose }) => {
   };
 
   return (
-    <div className="w-full md:w-[360px] h-full">
+    <div className="w-full md:w-[340px] h-full">
       <div className="w-full h-full overflow-y-auto bg-white dark:bg-neutral-800/95 backdrop-blur-sm border-l border-gray-200 dark:border-neutral-700 p-4 md:p-5 flex flex-col">
 
         {/* Header */}

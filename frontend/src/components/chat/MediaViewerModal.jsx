@@ -42,11 +42,23 @@ export default function MediaViewerModal({ url, type, fileName, onClose }) {
           <FiDownload size={22} />
         </button>
       </div>
-      <div className="flex-1 flex items-center justify-center px-4 pb-4" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="flex-1 flex items-center justify-center px-4 pb-4 min-h-0 overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         {type === "image" ? (
-          <img src={url} alt="media" className="max-h-full max-w-full rounded-lg object-contain" />
+          <img
+            src={url}
+            alt="media"
+            className="w-auto h-auto max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg"
+          />
         ) : (
-          <video src={url} controls autoPlay className="max-h-full max-w-full rounded-lg" />
+          <video
+            src={url}
+            controls
+            autoPlay
+            className="w-auto h-auto max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg"
+          />
         )}
       </div>
     </div>

@@ -84,7 +84,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options(corsOptions);
 
 const io = new Server(httpServer, {
   cors: {
@@ -95,8 +94,6 @@ const io = new Server(httpServer, {
 });
 
 app.set("io", io);
-
-app.options("/*", cors(corsOptions));
 
 /* ---------------- SOCKET AUTH (non-breaking) ---------------- */
 // If the client provides a JWT in handshake auth, validate it and attach userId.

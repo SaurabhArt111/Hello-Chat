@@ -163,7 +163,9 @@ export function CallProvider({ children }) {
   );
 
   const remoteUserIdRef = useRef(null);
-  remoteUserIdRef.current = remoteUser?.id || incomingCaller?.callerId;
+  useEffect(() => {
+    remoteUserIdRef.current = remoteUser?.id || incomingCaller?.callerId;
+  }, [remoteUser, incomingCaller]);
 
   const flushIceQueue = useCallback(async () => {
     const pc = peerConnectionRef.current;

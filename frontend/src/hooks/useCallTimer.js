@@ -1,29 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 export default function useCallTimer(isRunning) {
-  const [tick, setTick] = useState(0);
+  const [seconds, setSeconds] = useState(0);
   const startedAtRef = useRef(null);
 
-  if (isRunning && startedAtRef.current == null) startedAtRef.current = Date.now();
-  if (!isRunning && startedAtRef.current != null) startedAtRef.current = null;
-
   useEffect(() => {
-    if (!isRunning) return undefined;
+    if (!isRunning) {
+      startedAtRef.current = null;
+      setSeconds(0);
+      return undefined;
+    }
+    startedAtRef.current = Date.now();
+    setSeconds(0);
     const interval = window.setInterval(() => {
-      setTick((prev) => prev + 1);
+      setSeconds(Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000)));
     }, 1000);
     return () => window.clearInterval(interval);
   }, [isRunning]);
-
-  const seconds = startedAtRef.current
-    ? Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000))
-    : 0;
 
   const formatted = useMemo(() => {
     const mm = Math.floor(seconds / 60);
     const ss = seconds % 60;
     return `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
-  }, [seconds, tick]);
+  }, [seconds]);
 
   return { seconds, formatted };
 }

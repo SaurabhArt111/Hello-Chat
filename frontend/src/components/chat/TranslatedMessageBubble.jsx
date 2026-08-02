@@ -84,12 +84,16 @@ export default function TranslatedMessageBubble({
 
   const isText = (message.type || "text") === "text";
 
+  // Paired with the manual "Translate" button below, which is currently
+  // disabled (commented out). Re-enable both together if wanted.
+  // eslint-disable-next-line no-unused-vars
   const canRequestTranslation =
     isText &&
     originalText !== "" &&
     !hasTranslation &&
     typeof onTranslateRequest === "function";
 
+  // eslint-disable-next-line no-unused-vars
   const handleRequestTranslation = () => {
     if (!id || translating || !originalText) return;
     setTranslating(true);

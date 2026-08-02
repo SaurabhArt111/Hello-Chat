@@ -1,7 +1,7 @@
 /**
- * Shared translation: tries LibreTranslate first, then Google as fallback.
- * Set LIBRETRANSLATE_URL in .env to use your own instance (optional).
- * LibreTranslate public API may require API key for libretranslate.com.
+ * Shared translation using @vitalets/google-translate-api (unofficial,
+ * keyless - no signup, no API key, no external account needed). No other
+ * translation service is used.
  */
 
 const CODE_ALIASES = {
@@ -19,51 +19,8 @@ const CODE_ALIASES = {
   German: "de",
 };
 
-// Only use LibreTranslate if the operator has explicitly pointed this at a
-// real instance (self-hosted, or a paid libretranslate.com key). The public
-// https://libretranslate.com/translate endpoint rejects unauthenticated
-// requests with a 400, so defaulting to it just produces a failed request +
-// console spam on every single translation before falling back to Google.
-const LIBRETRANSLATE_URL = process.env.LIBRETRANSLATE_URL || null;
-const LIBRETRANSLATE_ENABLED = Boolean(LIBRETRANSLATE_URL);
-
 function normalizeTargetCode(targetLanguage) {
   return CODE_ALIASES[targetLanguage] || targetLanguage || "en";
-}
-
-/** Try LibreTranslate (public instance; add api_key in body if required) */
-async function translateWithLibreTranslate(text, targetCode) {
-  const body = {
-    q: text,
-    source: "auto",
-    target: targetCode,
-    format: "text",
-  };
-  if (process.env.LIBRETRANSLATE_API_KEY) {
-    body.api_key = process.env.LIBRETRANSLATE_API_KEY;
-  }
-
-  const res = await fetch(LIBRETRANSLATE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`LibreTranslate ${res.status}: ${errText}`);
-  }
-
-  const data = await res.json();
-  const translatedText =
-    data.translatedText ?? data.translation ?? text;
-  const detected =
-    data.detectedLanguage?.language ??
-    data.detectedLanguage?.code ??
-    (typeof data.detectedLanguage === "string" ? data.detectedLanguage : null);
-  const detectedLanguage = detected || "en";
-
-  return { translatedText, detectedLanguage };
 }
 
 /** Try @vitalets/google-translate-api (can be blocked by Google) */
@@ -95,18 +52,7 @@ let googleBlockedUntil = 0;
 export async function translateTo(text, targetLanguage) {
   const targetCode = normalizeTargetCode(targetLanguage);
 
-  // Try LibreTranslate first (usually more reliable than unofficial Google),
-  // but only if a real instance/key has been configured.
-  if (LIBRETRANSLATE_ENABLED) {
-    try {
-      return await translateWithLibreTranslate(text, targetCode);
-    } catch (libreErr) {
-      console.warn("LibreTranslate failed:", libreErr.message);
-    }
-  }
-
-  // Fallback to Google, unless we recently got rate-limited and are still
-  // in the cooldown window - in that case skip straight to original text.
+  // Skip straight to original text if we're in a post-rate-limit cooldown.
   if (Date.now() < googleBlockedUntil) {
     return { translatedText: text, detectedLanguage: "en" };
   }
@@ -129,7 +75,7 @@ export async function translateTo(text, targetLanguage) {
     }
   }
 
-  // Both failed: return original text
+  // Failed: return original text
   return { translatedText: text, detectedLanguage: "en" };
 }
 

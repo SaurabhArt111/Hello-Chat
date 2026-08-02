@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { FiPlay, FiPause, FiDownload } from "react-icons/fi";
+import MessageActionsMenu from "./MessageActionsMenu";
 
 // Simple pub/sub so starting one voice note pauses any other one that's
 // currently playing, instead of letting multiple play on top of each other.
@@ -22,6 +23,9 @@ const VoiceMessageBubble = ({
   onForward,
 }) => {
   const audioRef = useRef(null);
+  const containerRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+  const [showMenu, setShowMenu] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -64,8 +68,38 @@ const VoiceMessageBubble = ({
   useEffect(() => {
     activePlayers.add(pauseThis);
     return () => activePlayers.delete(pauseThis);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleContextMenu = (e) => {
+    e.preventDefault();
+    setShowMenu(true);
+  };
+
+  const handleTouchStart = () => {
+    longPressTimerRef.current = setTimeout(() => setShowMenu(true), 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleOutside);
+    document.addEventListener("touchstart", handleOutside, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      document.removeEventListener("touchstart", handleOutside);
+    };
+  }, [showMenu]);
 
   const handleSeek = (e) => {
     const el = audioRef.current;
@@ -175,60 +209,83 @@ const VoiceMessageBubble = ({
 
   return (
     <div className={`flex my-1 ${isOwn ? "justify-end" : "justify-start"} w-full px-1 sm:px-2`}>
+      <div
+        ref={containerRef}
+        className="relative"
+        onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+      >
       <div className={bubbleClasses}>
-        <audio
-          ref={audioRef}
-          src={audioUrl}
-          preload="metadata"
-          playsInline
-          disableRemotePlayback
-          style={{ display: "none" }}
-          aria-hidden
-        />
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={togglePlay}
-            className="w-10 h-10 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 focus:outline-none transition-colors"
-            aria-label={playing ? "Pause" : "Play"}
-          >
-            {playing ? (
-              <FiPause size={18} />
-            ) : (
-              <FiPlay size={18} className="ml-0.5" />
-            )}
-          </button>
-          <div className="flex-1 min-w-0">
-            <div
-              className="h-1.5 bg-black/20 rounded-full overflow-hidden cursor-pointer"
-              onClick={handleSeek}
-              role="slider"
-              aria-label="Seek"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(progress)}
+          <audio
+            ref={audioRef}
+            src={audioUrl}
+            preload="metadata"
+            playsInline
+            disableRemotePlayback
+            style={{ display: "none" }}
+            aria-hidden
+          />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={togglePlay}
+              className="w-10 h-10 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 focus:outline-none transition-colors"
+              aria-label={playing ? "Pause" : "Play"}
             >
+              {playing ? (
+                <FiPause size={18} />
+              ) : (
+                <FiPlay size={18} className="ml-0.5" />
+              )}
+            </button>
+            <div className="flex-1 min-w-0">
               <div
-                className="h-full bg-white/90 rounded-full transition-all duration-150"
-                style={{ width: `${progress}%` }}
-              />
+                className="h-1.5 bg-black/20 rounded-full overflow-hidden cursor-pointer"
+                onClick={handleSeek}
+                role="slider"
+                aria-label="Seek"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(progress)}
+              >
+                <div
+                  className="h-full bg-white/90 rounded-full transition-all duration-150"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-[10px] opacity-80 mt-1">{durationStr}</p>
             </div>
-            <p className="text-[10px] opacity-80 mt-1">{durationStr}</p>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="p-1.5 rounded-full hover:bg-black/20 transition-colors shrink-0"
+              aria-label="Download voice message"
+              title="Download"
+            >
+              <FiDownload size={14} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="p-1.5 rounded-full hover:bg-black/20 transition-colors shrink-0"
-            aria-label="Download voice message"
-            title="Download"
-          >
-            <FiDownload size={14} />
-          </button>
+          {time && (
+            <p className={`text-[10px] opacity-70 mt-1 ${isOwn ? "text-right" : "text-left"}`}>
+              {time}
+            </p>
+          )}
         </div>
-        {time && (
-          <p className={`text-[10px] opacity-70 mt-1 ${isOwn ? "text-right" : "text-left"}`}>
-            {time}
-          </p>
+
+        {/* Context menu (no reactions for voice messages yet - React just closes the menu) */}
+        {showMenu && (
+          <MessageActionsMenu
+            isOwn={isOwn}
+            onCopy={() => onCopy?.(id, "", audioUrl)}
+            onDeleteForMe={() => onDeleteForMe?.(id)}
+            onDeleteForEveryone={() => onDeleteForEveryone?.(id)}
+            align={isOwn ? "right" : "left"}
+            onReact={() => setShowMenu(false)}
+            onForward={() => onForward?.(id)}
+            onClose={() => setShowMenu(false)}
+          />
         )}
       </div>
     </div>

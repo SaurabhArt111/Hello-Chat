@@ -113,7 +113,6 @@ export const NotificationProvider = ({ children }) => {
       });
 
       const type = notification.type;
-      const meta = notification.metadata || {};
 
       // Don't show toast for missed_call - CallNotificationContext handles it
       if (type === "friend_request_accepted") {

@@ -62,9 +62,9 @@ export const uploadFile = async (req, res) => {
     else if (messageType === "video") type = "video";
     else if (messageType === "voice") type = "voice";
 
-    // Upload to Cloudinary (or local-disk fallback in dev - see
-    // utils/mediaStorage.js). Images are re-compressed server-side as a
-    // safety net; the client already compresses before upload.
+    // Save to local disk under backend/uploads (see utils/mediaStorage.js).
+    // Images are re-compressed server-side as a safety net; the client
+    // already compresses before upload.
     const saved = await saveMessageMediaBuffer(req.file.buffer, {
       mimetype: req.file.mimetype,
       originalname: req.file.originalname,

@@ -24,6 +24,7 @@ const ProfilePanel = ({
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [removeAvatarFlag, setRemoveAvatarFlag] = useState(false);
   const [isBlocking, setIsBlocking] = useState(false);
+  const [blockToggling, setBlockToggling] = useState(false);
   const [languages, setLanguages] = useState([]);
   const { preferredLanguage, setPreferredLanguage } = useLanguage();
 
@@ -96,6 +97,25 @@ const ProfilePanel = ({
       .catch(() => setIsBlocking(false));
   }, [viewingOther, selectedUserId]);
 
+  const handleToggleBlock = async () => {
+    if (!selectedUserId || blockToggling) return;
+    setBlockToggling(true);
+    try {
+      if (isBlocking) {
+        await unblockUser(selectedUserId);
+        setIsBlocking(false);
+      } else {
+        await blockUser(selectedUserId);
+        setIsBlocking(true);
+      }
+      onBlockChange?.();
+    } catch (err) {
+      alert(err?.response?.data?.message || "Failed to update block status");
+    } finally {
+      setBlockToggling(false);
+    }
+  };
+
   if (!user) return null;
 
   const handleAvatarChange = async (e) => {
@@ -145,7 +165,7 @@ const ProfilePanel = ({
         setPreferredLanguage(res.data.preferredLanguage);
       }
       setEditing(false);
-    } catch (err) {
+    } catch {
       alert("Failed to update profile");
     }
   };
@@ -218,6 +238,25 @@ const ProfilePanel = ({
         <h2 className="mt-3 font-semibold text-lg text-gray-900 dark:text-neutral-100">
           {user.username}
         </h2>
+
+        {viewingOther && (
+          <button
+            type="button"
+            onClick={handleToggleBlock}
+            disabled={blockToggling}
+            className={`mt-3 w-full py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-60 ${
+              isBlocking
+                ? "bg-gray-100 dark:bg-neutral-700 text-gray-700 dark:text-neutral-200 hover:bg-gray-200 dark:hover:bg-neutral-600"
+                : "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50"
+            }`}
+          >
+            {blockToggling
+              ? "Please wait…"
+              : isBlocking
+                ? "Unblock User"
+                : "Block User"}
+          </button>
+        )}
       </div>
 
       {/* Own Profile Info */}

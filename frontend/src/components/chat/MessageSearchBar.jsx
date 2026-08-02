@@ -42,7 +42,7 @@ const MessageSearchBar = ({ chatId, messages = [], onSelectMessage, onClose }) =
           return;
         }
         throw new Error("No API results");
-      } catch (err) {
+      } catch {
         const clientResults = searchInMessages(messages, query.trim());
         setResults(clientResults);
         setOpen(true);

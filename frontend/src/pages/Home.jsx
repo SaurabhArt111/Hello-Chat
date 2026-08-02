@@ -97,7 +97,6 @@ const Home = () => {
   const [loadingRecentChats, setLoadingRecentChats] = useState(true);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(true);
-  const [friendsLoadError, setFriendsLoadError] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   // Per-conversation "load older messages" state (see getMessages pagination).
   const [olderPagination, setOlderPagination] = useState({}); // { [conversationId]: { hasMore, oldestCursor } }
@@ -152,7 +151,6 @@ const Home = () => {
   const [floatingDateLabel, setFloatingDateLabel] = useState("");
   const [unreadSeparatorMessageId, setUnreadSeparatorMessageId] = useState(null);
   const isAtBottomRef = useRef(true);
-  const [currentScrollTop, setCurrentScrollTop] = useState(0);
   const scrollRafRef = useRef(null);
   const lastActiveChatIdRef = useRef(null);
 
@@ -416,7 +414,6 @@ const Home = () => {
   /* LOAD FRIENDS - Keep for backward compatibility, but prefer recentChats/contacts */
   const loadFriends = async () => {
     setLoadingFriends(true);
-    setFriendsLoadError(false);
     try {
       // Load recent chats by default (for chats view)
       if (activeView === "chats") {
@@ -428,7 +425,6 @@ const Home = () => {
         setFriends(res.data);
       }
     } catch (err) {
-      setFriendsLoadError(true);
       toast.error("Failed to load friends. Please try again.");
       console.error(err);
     } finally {
@@ -461,7 +457,6 @@ const Home = () => {
     loadRecentChats();
     loadContacts();
     loadGroups();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Reload data when switching views
@@ -471,7 +466,6 @@ const Home = () => {
     } else if (activeView === "contacts") {
       loadContacts();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
 
   // If no chat is selected, keep the sidebar open (WhatsApp-like).
@@ -609,6 +603,7 @@ const Home = () => {
                 _id: String(saved._id),
                 status: saved.status ?? "sent",
                 createdAt: saved.createdAt ?? m.createdAt,
+                time: saved.createdAt ? time : m.time,
                 text: saved.originalText ?? saved.text ?? m.text,
                 originalText: saved.originalText ?? m.originalText,
                 translatedText: saved.translatedText ?? m.translatedText,
@@ -940,8 +935,10 @@ const Home = () => {
           return nextState;
         });
 
-        // Unread separator logic: only for incoming messages when not at bottom
+        // Unread separator logic + notification sound: only for incoming
+        // messages when not at bottom / not sent by us.
         if (!isOwn) {
+          playReceiveSound();
           if (!isAtBottomRef.current && mid) {
             setUnreadSeparatorMessageId((prevId) => prevId || mid);
           } else if (isAtBottomRef.current) {
@@ -972,6 +969,7 @@ const Home = () => {
 
         // Only translate for 1-on-1 messages, not groups
         if (!groupId) {
+          if (!isOwn) playReceiveSound();
           try {
             const { originalText, translatedText, detectedLanguage } = await translateText(
               text,
@@ -1017,6 +1015,7 @@ const Home = () => {
           }
         } else {
           // Group message - use translatedText from backend if available
+          if (!isOwn) playReceiveSound();
           const translatedText = message?.translatedText || text;
           const originalText = message?.originalText || text;
           const mid = message?._id != null ? String(message._id) : null;
@@ -1453,7 +1452,6 @@ const Home = () => {
       socket.off("request_accepted", handleFriendRequestAccepted);
       socket.off("user_blocked", handleUserBlocked);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* SEND MESSAGE */
@@ -1946,7 +1944,6 @@ const Home = () => {
         const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
         const atBottom = distanceFromBottom < 50;
         isAtBottomRef.current = atBottom;
-        setCurrentScrollTop(el.scrollTop);
 
         setShowScrollToBottom(!atBottom);
         if (atBottom) {
@@ -2229,7 +2226,7 @@ const Home = () => {
             {/* CHAT AREA */}
             {activeView !== "calls" && (
               <div
-                className="flex-1 bg-gray-50 dark:bg-neutral-900 flex flex-col p-2 sm:p-3 md:p-5 pb-14 sm:pb-3 md:pb-5 relative bg-gradient-to-b from-gray-50 to-white dark:from-neutral-900 dark:to-neutral-800/50 min-h-0"
+                className="flex-1 bg-gray-50 dark:bg-neutral-900 flex flex-col p-2 sm:p-3 md:p-5 pb-24 lg:pb-5 relative bg-gradient-to-b from-gray-50 to-white dark:from-neutral-900 dark:to-neutral-800/50 min-h-0"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={handleDrop}
               >
@@ -2790,7 +2787,7 @@ const Home = () => {
         <button
           type="button"
           onClick={handleScrollToBottom}
-          className="absolute bottom-20 sm:bottom-8 right-4 sm:right-5 z-40 w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90"
+          className="absolute bottom-20 sm:bottom-36 right-1/2 z-40 w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg flex items-center justify-center transition-all active:scale-90"
         >
           <FiArrowDown size={18} />
         </button>
@@ -2798,7 +2795,7 @@ const Home = () => {
 
       {/* Sticky floating date while scrolling — absolute within container */}
       {floatingDateLabel && (
-        <div className="absolute top-14 sm:top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+        <div className="absolute top-14 sm:top-36 left-1/2 z-130 pointer-events-none">
           <span className="px-3 py-1 text-xs bg-neutral-800/90 text-neutral-300 rounded-full shadow-md backdrop-blur-sm">
             {floatingDateLabel}
           </span>
@@ -2808,16 +2805,10 @@ const Home = () => {
       {/* Mobile/Tablet Bottom Navigation — just Chats + Menu. Everything else
           (Contacts, Calls, Discover, Alerts, Settings, Profile) lives in the
           Menu sheet below, since those are occasional destinations, not
-          something you tap several times a minute like the chat list.
-          Hidden while a chat is open on mobile: previously this stayed
-          fixed at the bottom of the screen at all times, sitting directly
-          on top of the message compose bar (both are "fixed bottom-0"
-          relative to the viewport, so the compose bar being last in the
-          flex column didn't stop the overlap). Every major chat app hides
-          its tab bar once you're inside a conversation for the same
-          reason. */}
-      {!activeChat && (
-        <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-neutral-800 border-t border-gray-200 dark:border-neutral-700 py-1.5 pb-[env(safe-area-inset-bottom)]">
+          something you tap several several times a minute like the chat list.
+          Keep the nav visible on mobile and add bottom padding to the chat
+          content so it does not overlap the compose bar. */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-neutral-800 border-t border-gray-200 dark:border-neutral-700 py-1.5 pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-center justify-around px-2">
           <button
             type="button"
@@ -2845,7 +2836,6 @@ const Home = () => {
           </button>
         </div>
       </div>
-      )}
 
       {/* Menu bottom sheet */}
       <AnimatePresence>
