@@ -33,6 +33,8 @@ import {
 } from "../api/messages";
 import { amBlocking, checkBlocked, blockUser, unblockUser } from "../api/block";
 import { playReceiveSound } from "../utils/messageSound";
+import { uploadMediaFile, generateLocalMediaId } from "../utils/uploadMedia";
+import { setActiveChatId } from "../realtime/activeChatTracker";
 import { ensureE2eeIdentity, encryptForPeer, decryptMessageObject } from "../utils/e2ee";
 import { setupPushNotifications } from "../utils/push";
 import { translateText } from "../utils/translateService";
@@ -78,6 +80,14 @@ const PanelLoader = () => (
 const Home = () => {
   const ACTIVE_CHAT_KEY = "activeChat:v1";
   const [activeChat, setActiveChat] = useState(null);
+
+  useEffect(() => {
+    setActiveChatId(activeChat?._id || null);
+  }, [activeChat?._id]);
+
+  useEffect(() => {
+    return () => setActiveChatId(null);
+  }, []);
   const [friends, setFriends] = useState([]); // Keep for backward compatibility, but will use recentChats/contacts instead
   const [recentChats, setRecentChats] = useState([]); // Users with messages for "chats" view
   const [contacts, setContacts] = useState([]); // Accepted friends for "contacts" view
@@ -299,8 +309,8 @@ const Home = () => {
     try {
       const isGroup = !!chat.isGroup;
       const res = isGroup
-        ? await getGroupMessages(chat._id, { limit: 50, before: pageInfo.oldestCursor })
-        : await getMessages(userId, chat._id, { limit: 50, before: pageInfo.oldestCursor });
+        ? await getGroupMessages(chat._id, { limit: 20, before: pageInfo.oldestCursor })
+        : await getMessages(userId, chat._id, { limit: 20, before: pageInfo.oldestCursor });
 
       const rawMessages = res.data?.messages || [];
       const formatted = rawMessages.map((raw) => {
@@ -1104,8 +1114,8 @@ const Home = () => {
         // Check if it's a group chat
         const isGroup = activeChat.isGroup || false;
         const res = isGroup
-          ? await getGroupMessages(activeChat._id, { limit: 50 })
-          : await getMessages(userId, activeChat._id, { limit: 50 });
+          ? await getGroupMessages(activeChat._id, { limit: 40 })
+          : await getMessages(userId, activeChat._id, { limit: 40 });
 
         const page = isGroup ? res.data : res.data; // both now return {messages, hasMore, oldestCursor}
         const rawMessages = Array.isArray(page) ? page : page.messages || [];
@@ -1571,7 +1581,7 @@ const Home = () => {
     }
   };
 
-  const handleMediaMessage = (saved) => {
+  const handleMediaMessage = (saved, localId) => {
     const user = JSON.parse(localStorage.getItem("user") || "null");
     const userId = user?.id || user?._id;
     if (!userId) return;
@@ -1594,16 +1604,114 @@ const Home = () => {
       duration: saved.duration,
       text: saved.text || saved.fileName || "",
       isOwn,
+      status: saved.status ?? (isOwn ? "sent" : "seen"),
       time: new Date(saved.createdAt || Date.now()).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
       }),
+      createdAt: saved.createdAt || new Date().toISOString(),
     };
 
+    setMessages((prev) => {
+      const list = prev[convoId] || [];
+      // Reconcile with the optimistic "sending" bubble (matched by localId)
+      // instead of appending a duplicate. Revoke its blob: preview URL now
+      // that the real, permanent URL has taken its place.
+      if (localId) {
+        const idx = list.findIndex((m) => m?.localId === localId);
+        if (idx !== -1) {
+          const prevBlobUrl = list[idx].file;
+          if (typeof prevBlobUrl === "string" && prevBlobUrl.startsWith("blob:")) {
+            URL.revokeObjectURL(prevBlobUrl);
+          }
+          const next = [...list];
+          next[idx] = messageObj;
+          return { ...prev, [convoId]: next };
+        }
+      }
+      return { ...prev, [convoId]: [...list, messageObj] };
+    });
+  };
+
+  /** Called the instant a media/voice send starts, before the upload
+   * request even goes out - shows a "sending" bubble with a local preview
+   * immediately instead of the chat appearing to do nothing until the
+   * upload finishes. */
+  const handleMediaSendStart = (optimisticMessage) => {
+    if (!activeChat) return;
+    const convoId = String(activeChat._id);
     setMessages((prev) => ({
       ...prev,
-      [convoId]: [...(prev[convoId] || []), messageObj],
+      [convoId]: [...(prev[convoId] || []), optimisticMessage],
     }));
+  };
+
+  const handleMediaUploadProgress = (localId, percent) => {
+    if (!activeChat) return;
+    const convoId = String(activeChat._id);
+    setMessages((prev) => {
+      const list = prev[convoId] || [];
+      const idx = list.findIndex((m) => m?.localId === localId);
+      if (idx === -1) return prev;
+      const next = [...list];
+      next[idx] = { ...next[idx], uploadProgress: percent };
+      return { ...prev, [convoId]: next };
+    });
+  };
+
+  const handleMediaSendError = (localId) => {
+    if (!activeChat) return;
+    const convoId = String(activeChat._id);
+    setMessages((prev) => {
+      const list = prev[convoId] || [];
+      const idx = list.findIndex((m) => m?.localId === localId);
+      if (idx === -1) return prev;
+      const next = [...list];
+      next[idx] = { ...next[idx], status: "failed" };
+      return { ...prev, [convoId]: next };
+    });
+  };
+
+  /** Retry a failed media/voice send. The file is never re-picked - it's
+   * kept on the optimistic message's `_retry` field from when the send
+   * first started. */
+  const handleRetryMedia = async (localId) => {
+    if (!activeChat) return;
+    const convoId = String(activeChat._id);
+    const list = messages[convoId] || [];
+    const msg = list.find((m) => m?.localId === localId);
+    if (!msg?._retry) return;
+
+    const user = JSON.parse(localStorage.getItem("user") || "null");
+    const senderId = user?.id || user?._id;
+    if (!senderId) return;
+
+    setMessages((prev) => {
+      const l = prev[convoId] || [];
+      const idx = l.findIndex((m) => m?.localId === localId);
+      if (idx === -1) return prev;
+      const next = [...l];
+      next[idx] = { ...next[idx], status: "sending", uploadProgress: 0 };
+      return { ...prev, [convoId]: next };
+    });
+
+    try {
+      const saved = await uploadMediaFile({
+        file: msg._retry.file,
+        senderId,
+        activeChatId: activeChat._id,
+        isGroup: !!activeChat.isGroup,
+        messageType: msg._retry.messageType,
+        caption: msg._retry.caption,
+        duration: msg._retry.duration,
+        onProgress: (pct) => handleMediaUploadProgress(localId, pct),
+      });
+      handleMediaMessage(saved, localId);
+    } catch (err) {
+      console.error("Retry upload failed:", err);
+      toast.error(err.response?.data?.message || "Failed to upload file");
+      handleMediaSendError(localId);
+    }
   };
 
   const handleTranslateMessage = async (messageId, text) => {
@@ -2002,22 +2110,36 @@ const Home = () => {
     if (file.type.startsWith("image/")) messageType = "image";
     else if (file.type.startsWith("video/")) messageType = "video";
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("senderId", userId);
-    if (isGroup) {
-      formData.append("groupId", activeChat._id);
-    } else {
-      formData.append("receiverId", activeChat._id);
-    }
-    formData.append("messageType", messageType);
+    const localId = generateLocalMediaId();
+    const optimistic = {
+      _id: undefined,
+      localId,
+      type: messageType,
+      file: URL.createObjectURL(file),
+      isOwn: true,
+      status: "sending",
+      uploadProgress: 0,
+      text: "",
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      createdAt: new Date().toISOString(),
+      _retry: { file, messageType },
+    };
+    handleMediaSendStart(optimistic);
 
     try {
-      const res = await axios.post("/messages/upload", formData);
-      handleMediaMessage(res.data);
+      const saved = await uploadMediaFile({
+        file,
+        senderId: userId,
+        activeChatId: activeChat._id,
+        isGroup,
+        messageType,
+        onProgress: (pct) => handleMediaUploadProgress(localId, pct),
+      });
+      handleMediaMessage(saved, localId);
     } catch (err) {
       console.error("Drop upload failed", err);
       toast.error(err.response?.data?.message || "Failed to upload file");
+      handleMediaSendError(localId);
     }
   };
 
@@ -2346,7 +2468,7 @@ const Home = () => {
 
                             elements.push(
                               <motion.div
-                                key={msg._id || msg.clientMessageId || `m-${index}`}
+                                key={msg._id || msg.clientMessageId || msg.localId || `m-${index}`}
                                 data-message-id={msg._id ?? undefined}
                                 data-message-created-at={msg.createdAt ?? ""}
                                 initial={{ opacity: 0, y: 8 }}
@@ -2360,6 +2482,10 @@ const Home = () => {
                                     duration={msg.duration}
                                     isOwn={msg.isOwn}
                                     time={msg.time}
+                                    status={msg.status}
+                                    seenAt={msg.seenAt}
+                                    uploadProgress={msg.uploadProgress}
+                                    onRetry={msg.localId ? () => handleRetryMedia(msg.localId) : undefined}
                                     onCopy={handleCopyMessage}
                                     onDeleteForMe={handleDeleteForMe}
                                     onDeleteForEveryone={handleDeleteForEveryone}
@@ -2375,6 +2501,8 @@ const Home = () => {
                                     time={msg.time}
                                     status={msg.status}
                                     seenAt={msg.seenAt}
+                                    uploadProgress={msg.uploadProgress}
+                                    onRetry={msg.localId ? () => handleRetryMedia(msg.localId) : undefined}
                                     reactions={msg.reactions || []}
                                     forwarded={msg.forwarded}
                                     deletedForEveryone={msg.deletedForEveryone}
@@ -2429,6 +2557,9 @@ const Home = () => {
                         <MessageInput
                           onSend={handleSendMessage}
                           onMediaMessage={handleMediaMessage}
+                          onMediaSendStart={handleMediaSendStart}
+                          onMediaUploadProgress={handleMediaUploadProgress}
+                          onMediaSendError={handleMediaSendError}
                           activeChatId={activeChat._id}
                           isGroup={!!activeChat.isGroup}
                           disabled={sendingMessage}

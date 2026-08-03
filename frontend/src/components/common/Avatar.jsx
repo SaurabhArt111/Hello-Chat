@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 const Avatar = ({ name, src, size = "md", online }) => {
   const sizeClass =
@@ -8,13 +8,21 @@ const Avatar = ({ name, src, size = "md", online }) => {
       ? "w-10 h-10"
       : "w-8 h-8";
 
+  // If the image URL fails to load (file deleted, storage wiped, offline),
+  // fall back to the initials placeholder instead of a broken-image icon.
+  // Reset whenever `src` changes so switching to a new, valid avatar retries.
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+  const showImage = Boolean(src) && !failed;
+
   return (
     <div className="relative">
-      {src ? (
+      {showImage ? (
         <img
           src={src}
           alt={name}
           loading="lazy"
+          onError={() => setFailed(true)}
           className={`${sizeClass} rounded-full object-cover ring-2 ring-gray-200 dark:ring-neutral-700 shadow-md`}
         />
       ) : (

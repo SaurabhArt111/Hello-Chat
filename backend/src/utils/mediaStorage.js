@@ -3,9 +3,15 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import sharp from "sharp";
 
-// All uploads live under backend/uploads. This project stores files locally
-// and serves them from /uploads via express.static().
-export const UPLOAD_ROOT = path.resolve("uploads");
+// All uploads live under backend/uploads by default. This project stores
+// files locally and serves them from /uploads via express.static().
+//
+// On a host with an ephemeral filesystem (e.g. Render's free/standard
+// tiers), this directory gets wiped on every deploy/restart. Set UPLOAD_DIR
+// to an absolute path pointing at a mounted persistent disk (e.g. Render's
+// disk feature, mounted at something like /var/data) to survive restarts -
+// see backend/.env.example.
+export const UPLOAD_ROOT = path.resolve(process.env.UPLOAD_DIR || "uploads");
 if (!fs.existsSync(UPLOAD_ROOT)) fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
 
 function saveLocalBuffer(buffer, folder, filename) {

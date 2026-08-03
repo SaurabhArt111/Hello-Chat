@@ -15,7 +15,7 @@ export default function useCallState({
 
   const mappedState = useMemo(() => {
     if (rawState === "incoming") return CALL_STATES.RINGING;
-    if (rawState === "calling") return CALL_STATES.CONNECTING;
+    if (rawState === "calling" || rawState === "connecting") return CALL_STATES.CONNECTING;
     if (rawState === "connected") return CALL_STATES.ACTIVE;
     return CALL_STATES.IDLE;
   }, [rawState]);

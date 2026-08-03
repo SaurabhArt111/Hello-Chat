@@ -323,12 +323,14 @@ const SharedMedia = ({ currentUserId, selectedUserId }) => {
               <video
                 src={previewItem.fileUrl}
                 controls
+                onError={() => { markFailed(previewItem._id); setPreviewItem(null); }}
                 className="w-full h-full object-contain"
               />
             ) : (
               <img
                 src={previewItem.fileUrl}
                 alt=""
+                onError={() => { markFailed(previewItem._id); setPreviewItem(null); }}
                 className="w-full h-full object-contain"
               />
             )}

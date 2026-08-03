@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
-import { FiPlay, FiPause, FiDownload } from "react-icons/fi";
+import { FiPlay, FiPause, FiDownload, FiFile, FiCheck } from "react-icons/fi";
+import { Clock } from "lucide-react";
 import MessageActionsMenu from "./MessageActionsMenu";
 
 // Simple pub/sub so starting one voice note pauses any other one that's
@@ -17,6 +18,10 @@ const VoiceMessageBubble = ({
   isOwn,
   time,
   id,
+  status,
+  seenAt,
+  uploadProgress,
+  onRetry,
   onCopy,
   onDeleteForMe,
   onDeleteForEveryone,
@@ -29,16 +34,20 @@ const VoiceMessageBubble = ({
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [mediaFailed, setMediaFailed] = useState(false);
+  const isSending = status === "sending";
   // Only ever seed this with a real, finite, positive number - a raw
   // `duration` prop of Infinity/NaN (both truthy!) is exactly what caused
-  // the "Infinity:NaN" display bug previously: `Number(Infinity) || 0`
+  // the "Infinity:NaN" display bug previously: `Number(duration) || 0`
   // evaluates to Infinity, not 0, because Infinity is truthy.
   const safeInitialDuration = Number.isFinite(Number(duration)) && Number(duration) > 0 ? Number(duration) : 0;
   const [totalDuration, setTotalDuration] = useState(safeInitialDuration);
   const [durationUnknown, setDurationUnknown] = useState(safeInitialDuration === 0);
 
+  useEffect(() => setMediaFailed(false), [audioUrl]);
+
   const togglePlay = () => {
-    if (!audioRef.current) return;
+    if (!audioRef.current || mediaFailed) return;
     if (playing) {
       audioRef.current.pause();
       setPlaying(false);
@@ -124,6 +133,7 @@ const VoiceMessageBubble = ({
       setProgress(0);
       setCurrentTime(0);
     };
+    const onError = () => setMediaFailed(true);
     // The bug behind "Infinity:NaN": some browsers (notably Chrome) report
     // `duration === Infinity` for webm/opus blobs recorded via
     // MediaRecorder, because the container's duration header is only
@@ -169,11 +179,13 @@ const VoiceMessageBubble = ({
     el.addEventListener("ended", onEnded);
     el.addEventListener("loadedmetadata", onLoadedMetadata);
     el.addEventListener("durationchange", onDurationChange);
+    el.addEventListener("error", onError);
     return () => {
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("ended", onEnded);
       el.removeEventListener("loadedmetadata", onLoadedMetadata);
       el.removeEventListener("durationchange", onDurationChange);
+      el.removeEventListener("error", onError);
     };
   }, [audioUrl]);
 
@@ -227,14 +239,26 @@ const VoiceMessageBubble = ({
             style={{ display: "none" }}
             aria-hidden
           />
+          {mediaFailed ? (
+            <div className="flex items-center gap-2 py-1 pr-2 min-w-[160px]">
+              <FiFile className="opacity-70" />
+              <span className="text-xs opacity-80">Voice message unavailable</span>
+            </div>
+          ) : (
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={togglePlay}
-              className="w-10 h-10 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 focus:outline-none transition-colors"
+              disabled={isSending}
+              className="w-10 h-10 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 focus:outline-none transition-colors disabled:cursor-default relative"
               aria-label={playing ? "Pause" : "Play"}
             >
-              {playing ? (
+              {isSending ? (
+                <svg className="w-6 h-6 animate-spin opacity-90" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : playing ? (
                 <FiPause size={18} />
               ) : (
                 <FiPlay size={18} className="ml-0.5" />
@@ -252,25 +276,51 @@ const VoiceMessageBubble = ({
               >
                 <div
                   className="h-full bg-white/90 rounded-full transition-all duration-150"
-                  style={{ width: `${progress}%` }}
+                  style={{ width: `${isSending ? (uploadProgress || 0) : progress}%` }}
                 />
               </div>
-              <p className="text-[10px] opacity-80 mt-1">{durationStr}</p>
+              <p className="text-[10px] opacity-80 mt-1">
+                {isSending ? (Number.isFinite(uploadProgress) ? `Sending… ${uploadProgress}%` : "Sending…") : durationStr}
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="p-1.5 rounded-full hover:bg-black/20 transition-colors shrink-0"
-              aria-label="Download voice message"
-              title="Download"
-            >
-              <FiDownload size={14} />
-            </button>
+            {!isSending && (
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="p-1.5 rounded-full hover:bg-black/20 transition-colors shrink-0"
+                aria-label="Download voice message"
+                title="Download"
+              >
+                <FiDownload size={14} />
+              </button>
+            )}
           </div>
+          )}
           {time && (
-            <p className={`text-[10px] opacity-70 mt-1 ${isOwn ? "text-right" : "text-left"}`}>
-              {time}
-            </p>
+            <div className={`text-[10px] opacity-70 mt-1 flex items-center gap-1.5 ${isOwn ? "justify-end text-right" : "justify-start text-left"}`}>
+              <span>{time}</span>
+              {isOwn && status !== "cancelled" && (
+                <span className={status === "seen" ? "text-blue-300" : "opacity-90"}>
+                  {status === "sending" && <Clock size={12} className="inline opacity-80" />}
+                  {status === "sent" && <FiCheck size={13} className="inline" />}
+                  {(status === "delivered" || status === "seen") && (
+                    <span className="inline-flex -space-x-2">
+                      <FiCheck size={13} />
+                      <FiCheck size={13} />
+                    </span>
+                  )}
+                  {status === "failed" && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onRetry?.(); }}
+                      className="text-red-200 underline text-[10px] font-medium"
+                    >
+                      Failed · Retry
+                    </button>
+                  )}
+                </span>
+              )}
+            </div>
           )}
         </div>
 

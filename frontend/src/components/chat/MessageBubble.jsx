@@ -7,6 +7,32 @@ import MediaViewerModal from "./MediaViewerModal";
 
 const urlRegex = /(https?:\/\/\S+)/gi;
 
+/** Small circular progress spinner shown over a media thumbnail while it
+ * uploads. Falls back to an indeterminate spin when no percentage is known
+ * yet (e.g. before the first onUploadProgress tick). */
+const UploadSpinner = ({ progress }) => {
+  const known = Number.isFinite(progress) && progress > 0;
+  return (
+    <div className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-white text-[10px] font-semibold">
+      <svg className={`w-8 h-8 absolute ${known ? "" : "animate-spin"}`} viewBox="0 0 36 36">
+        <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="3" />
+        <circle
+          cx="18"
+          cy="18"
+          r="16"
+          fill="none"
+          stroke="white"
+          strokeWidth="3"
+          strokeDasharray={2 * Math.PI * 16}
+          strokeDashoffset={known ? 2 * Math.PI * 16 * (1 - progress / 100) : 2 * Math.PI * 16 * 0.75}
+          strokeLinecap="round"
+        />
+      </svg>
+      {known ? `${progress}%` : ""}
+    </div>
+  );
+};
+
 const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const renderTextWithLinks = (text, highlightQuery = "") => {
@@ -61,6 +87,8 @@ const MessageBubble = ({
   file,
   time,
   status,
+  uploadProgress,
+  onRetry,
   scheduledFor,
   seenAt,
   reactions = [],
@@ -81,12 +109,19 @@ const MessageBubble = ({
   const [isEditing, setIsEditing] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [editText, setEditText] = useState(text);
+  const [mediaFailed, setMediaFailed] = useState(false);
   const longPressTimerRef = useRef(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
     setEditText(text);
   }, [text]);
+
+  useEffect(() => {
+    setMediaFailed(false);
+  }, [file]);
+
+  const isSending = status === "sending";
 
   const closeAll = () => {
     setShowMenu(false);
@@ -244,35 +279,66 @@ const MessageBubble = ({
 
               {/* IMAGE */}
               {type === "image" && file && (
-                <img
-                  src={file}
-                  alt="sent"
-                  loading="lazy"
-                  onClick={() => setViewerOpen(true)}
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full cursor-pointer"
-                />
+                <div className="relative">
+                  {mediaFailed ? (
+                    <div className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full h-32 flex flex-col items-center justify-center gap-1 bg-black/10 text-current">
+                      <FiFile className="opacity-70" />
+                      <span className="text-[11px] opacity-70">Image unavailable</span>
+                    </div>
+                  ) : (
+                    <img
+                      src={file}
+                      alt="sent"
+                      loading="lazy"
+                      onClick={() => !isSending && setViewerOpen(true)}
+                      onError={() => setMediaFailed(true)}
+                      className={`rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full cursor-pointer ${isSending ? "opacity-60" : ""}`}
+                    />
+                  )}
+                  {isSending && !mediaFailed && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <UploadSpinner progress={uploadProgress} />
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* VIDEO */}
               {type === "video" && file && (
-                <video
-                  src={file}
-                  controls
-                  onClick={() => setViewerOpen(true)}
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full cursor-pointer"
-                />
+                <div className="relative">
+                  {mediaFailed ? (
+                    <div className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full h-32 flex flex-col items-center justify-center gap-1 bg-black/10 text-current">
+                      <FiFile className="opacity-70" />
+                      <span className="text-[11px] opacity-70">Video unavailable</span>
+                    </div>
+                  ) : (
+                    <video
+                      src={file}
+                      controls={!isSending}
+                      onClick={() => !isSending && setViewerOpen(true)}
+                      onError={() => setMediaFailed(true)}
+                      className={`rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full cursor-pointer ${isSending ? "opacity-60" : ""}`}
+                    />
+                  )}
+                  {isSending && !mediaFailed && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <UploadSpinner progress={uploadProgress} />
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* FILE */}
               {type === "file" && file && (
                 <a
-                  href={file}
+                  href={isSending ? undefined : file}
                   download
-                  className="text-blue-300 underline"
+                  className={`text-blue-300 underline inline-flex items-center gap-1.5 ${isSending ? "opacity-70 pointer-events-none" : ""}`}
                   target="_blank"
                   rel="noreferrer"
                 >
                   <FiFile className="inline mr-1" /> {text || "Download File"}
+                  {isSending && <Clock size={12} className="opacity-80" />}
                 </a>
               )}
 
@@ -298,12 +364,22 @@ const MessageBubble = ({
                   className={status === "seen" ? "text-blue-300" : "opacity-90"}
                   title={status === "seen" && seenAt ? `Seen at ${new Date(seenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : undefined}
                 >
+                  {status === "sending" && <Clock size={12} className="inline opacity-80" />}
                   {status === "sent" && <FiCheck size={13} className="inline" />}
                   {(status === "delivered" || status === "seen") && (
                     <span className="inline-flex -space-x-2">
                       <FiCheck size={13} />
                       <FiCheck size={13} />
                     </span>
+                  )}
+                  {status === "failed" && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onRetry?.(); }}
+                      className="text-red-200 underline text-[10px] font-medium"
+                    >
+                      Failed · Retry
+                    </button>
                   )}
                 </span>
               )}

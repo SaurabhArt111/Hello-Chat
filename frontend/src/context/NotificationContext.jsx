@@ -143,6 +143,9 @@ export const NotificationProvider = ({ children }) => {
       const senderId = data?.senderId || data?.message?.sender;
       if (!senderId || String(senderId) === String(myUserId)) return; // ignore my own messages
 
+      const groupId = data?.groupId || data?.message?.group;
+      const conversationId = groupId || senderId;
+
       const senderName = data?.senderName || data?.message?.senderName || "New message";
       const preview =
         data?.text ||
@@ -153,7 +156,7 @@ export const NotificationProvider = ({ children }) => {
           ? "Sent an attachment"
           : "New message");
 
-      showBackgroundNotification(senderName, { body: preview, tag: `chat-${senderId}` });
+      showBackgroundNotification(senderName, { body: preview, tag: `chat-${conversationId}` }, conversationId);
     };
 
     socket.on("new_message", notifyIncoming);

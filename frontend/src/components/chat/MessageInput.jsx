@@ -1,15 +1,25 @@
 import React, { useRef, useState, useEffect } from "react";
 import { Clock } from "lucide-react";
 import socket from "../../socket";
-import axios from "../../api/axios";
 import { useToastContext } from "../../context/ToastContext";
 import { compressFileForUpload, FileTooLargeError } from "../../utils/compressFile";
+import { generateLocalMediaId, buildOptimisticMediaMessage, uploadMediaFile } from "../../utils/uploadMedia";
 import { FiPaperclip, FiImage, FiVideo, FiFile, FiCamera, FiMic } from "react-icons/fi";
 import MediaEditorModal from "./MediaEditorModal";
 
 const TYPING_IDLE_MS = 1000;
 
-const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, disabled = false, onSchedule }) => {
+const MessageInput = ({
+  onSend,
+  onMediaMessage,
+  onMediaSendStart,
+  onMediaUploadProgress,
+  onMediaSendError,
+  activeChatId,
+  isGroup = false,
+  disabled = false,
+  onSchedule,
+}) => {
   const toast = useToastContext();
   const fileRef = useRef();
   const menuRef = useRef();
@@ -34,24 +44,25 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
     const senderId = user?.id || user?._id;
     if (!senderId || !activeChatId) return;
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("senderId", senderId);
-    if (isGroup) {
-      formData.append("groupId", activeChatId);
-    } else {
-      formData.append("receiverId", activeChatId);
-    }
-    formData.append("messageType", messageType);
-    if (caption) formData.append("text", caption);
+    const localId = generateLocalMediaId();
+    const optimistic = buildOptimisticMediaMessage({ localId, file, messageType, caption });
+    onMediaSendStart?.(optimistic);
 
     try {
-      const res = await axios.post("/messages/upload", formData);
-      const saved = res.data;
-      if (onMediaMessage) onMediaMessage(saved);
+      const saved = await uploadMediaFile({
+        file,
+        senderId,
+        activeChatId,
+        isGroup,
+        messageType,
+        caption,
+        onProgress: (pct) => onMediaUploadProgress?.(localId, pct),
+      });
+      if (onMediaMessage) onMediaMessage(saved, localId);
     } catch (err) {
       console.error("Failed to upload media", err);
       toast.error(err.response?.data?.message || "Failed to upload file");
+      onMediaSendError?.(localId, err);
     }
   };
 
@@ -153,27 +164,35 @@ const MessageInput = ({ onSend, onMediaMessage, activeChatId, isGroup = false, d
         }
         const ext = isMp4 ? "m4a" : "webm";
         const file = new File([blob], `voice.${ext}`, { type: blobType });
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("senderId", senderId);
-        if (isGroup) {
-          formData.append("groupId", activeChatId);
-        } else {
-          formData.append("receiverId", activeChatId);
-        }
-        formData.append("messageType", "voice");
-        formData.append("duration", String(durationSec));
+
+        const localId = generateLocalMediaId();
+        const optimistic = buildOptimisticMediaMessage({
+          localId,
+          file,
+          messageType: "voice",
+          duration: durationSec,
+        });
+        onMediaSendStart?.(optimistic);
+        setIsRecording(false);
+
         try {
-          const res = await axios.post("/messages/upload", formData);
-          const saved = res.data;
+          const saved = await uploadMediaFile({
+            file,
+            senderId,
+            activeChatId,
+            isGroup,
+            messageType: "voice",
+            duration: durationSec,
+            onProgress: (pct) => onMediaUploadProgress?.(localId, pct),
+          });
           if (saved && !saved.messageType) saved.messageType = "voice";
-          if (onMediaMessage) onMediaMessage(saved);
+          if (onMediaMessage) onMediaMessage(saved, localId);
         } catch (err) {
           console.error("Voice upload failed", err);
           toast.error(err.response?.data?.message || "Failed to upload voice message");
+          onMediaSendError?.(localId, err);
         }
         chunksRef.current = [];
-        setIsRecording(false);
       };
       recorder.start(100);
       mediaRecorderRef.current = recorder;

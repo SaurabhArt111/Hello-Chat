@@ -250,6 +250,16 @@ export function CallProvider({ children }) {
             clearTimeout(connectTimeoutRef.current);
             connectTimeoutRef.current = null;
           }
+          // This is the real "the call is actually live" moment - media is
+          // flowing, not just "the other person tapped accept". Previously
+          // callState flipped to "connected" (and the call timer started)
+          // as soon as signaling completed, so a slow or failed ICE
+          // negotiation showed a live, ticking call with dead audio for up
+          // to CONNECT_TIMEOUT_MS before anything looked wrong.
+          if (!callConnectedAtRef.current) {
+            callConnectedAtRef.current = Date.now();
+          }
+          setCallState("connected");
         } else if (pc.connectionState === "failed") {
           // "failed" can often be recovered from with an ICE restart
           // (e.g. after a brief network blip or wifi/cellular handoff on
@@ -405,8 +415,7 @@ export function CallProvider({ children }) {
     }
 
     createPeerConnection(false);
-    setCallState("connected");
-    callConnectedAtRef.current = Date.now();
+    setCallState("connecting");
 
     socket.emit("accept_call", {
       callerId: caller.callerId,
@@ -473,8 +482,7 @@ export function CallProvider({ children }) {
 
     const handleCallAccepted = async (data) => {
       setRecipientOffline(false);
-      callConnectedAtRef.current = Date.now();
-      setCallState("connected");
+      setCallState("connecting");
       try {
         const pc = createPeerConnection(true);
         const offer = await pc.createOffer();

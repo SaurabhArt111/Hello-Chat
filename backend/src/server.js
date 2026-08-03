@@ -6,6 +6,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import multer from "multer";
 
 import messageRoutes from "./routes/messageRoutes.js";
 import friendRequestRoutes from "./routes/friendRequestRoutes.js";
@@ -29,6 +30,7 @@ import adminRoutes from "./routes/adminRoutes.js";
 import reportRoutes from "./routes/reportRoutes.js";
 import pushRoutes from "./routes/pushRoutes.js";
 import { sendCallPush, sendMessagePush } from "./utils/webPush.js";
+import { UPLOAD_ROOT } from "./utils/mediaStorage.js";
 
 import {
   handleUserOnline,
@@ -116,30 +118,7 @@ io.use((socket, next) => {
 
 /* ---------------- MIDDLEWARE ---------------- */
 app.use(express.json());
-app.use("/uploads", express.static(path.resolve("uploads")));
-
-/* ---------------- ROUTES ---------------- */
-app.use("/api/auth", authRoutes);
-app.use("/api/messages", messageRoutes);
-app.use("/api/messages", messageUploadRoutes);
-app.use("/api/messages", messageActionsRoutes);
-app.use("/api/user", userRoutes);
-app.use("/api/friends", friendRequestRoutes);
-app.use("/api/calls", callRoutes);
-app.use("/api/chats", chatRoutes);
-app.use("/api/darkmode", darkModeRoutes);
-app.use("/api/shared-media", sharedMediaRoutes);
-app.use("/api/notifications", notificationRoutes);
-app.use("/api/message-sound", messageSoundRoutes);
-app.use("/api/last-seen", lastSeenRoutes);
-app.use("/api/profile-photo-privacy", profilePhotoRoutes);
-app.use("/api/translate", translateRoutes);
-app.use("/api/block", blockRoutes);
-app.use("/api/groups", groupRoutes);
-app.use("/api/scheduled-messages", scheduledMessageRoutes);
-app.use("/api/admin", adminRoutes);
-app.use("/api/reports", reportRoutes);
-app.use("/api/push", pushRoutes);
+app.use("/uploads", express.static(UPLOAD_ROOT));
 
 /* ---------------- HTTPS URL SAFETY NET ---------------- */
 // Old rows saved before the trust-proxy fix have "http://<this-host>/..."
@@ -147,6 +126,15 @@ app.use("/api/push", pushRoutes);
 // down every response shape that might include one, rewrite them to
 // https:// on the way out, everywhere, so old messages/avatars self-heal
 // without a manual migration.
+//
+// IMPORTANT: this must be registered BEFORE the /api/* route mounts below.
+// It works by monkey-patching res.json() on the way *in*, so every route
+// handler downstream picks up the patched version. It previously sat AFTER
+// all the routes, which meant it only ever patched res.json for requests
+// that fell through unmatched to "/" - i.e. it never ran for a single real
+// API response. Old http:// URLs were shipped to the browser as-is and
+// silently blocked as mixed content on an https:// page, which looks
+// exactly like "the avatar/group logo/media is missing".
 app.use((req, res, next) => {
   const host = req.get("host");
   if (!host) return next();
@@ -181,9 +169,83 @@ app.use((req, res, next) => {
   next();
 });
 
+/* ---------------- ROUTES ---------------- */
+app.use("/api/auth", authRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/messages", messageUploadRoutes);
+app.use("/api/messages", messageActionsRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/friends", friendRequestRoutes);
+app.use("/api/calls", callRoutes);
+app.use("/api/chats", chatRoutes);
+app.use("/api/darkmode", darkModeRoutes);
+app.use("/api/shared-media", sharedMediaRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/message-sound", messageSoundRoutes);
+app.use("/api/last-seen", lastSeenRoutes);
+app.use("/api/profile-photo-privacy", profilePhotoRoutes);
+app.use("/api/translate", translateRoutes);
+app.use("/api/block", blockRoutes);
+app.use("/api/groups", groupRoutes);
+app.use("/api/scheduled-messages", scheduledMessageRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/push", pushRoutes);
+
 /* ---------------- ROOT ---------------- */
 app.get("/", (req, res) => {
   res.send("API running...");
+});
+
+/* ---------------- 404 (JSON, for unmatched /api/* routes) ---------------- */
+app.use("/api", (req, res) => {
+  res.status(404).json({ message: "Not found" });
+});
+
+/* ---------------- CENTRAL ERROR HANDLER ----------------
+ * Every route above catches its own errors and returns JSON - but a handful
+ * of failure modes never reach those try/catch blocks at all:
+ *   - multer errors (bad file type from fileFilter, file too large, a
+ *     malformed multipart body) are thrown by the upload middleware BEFORE
+ *     the controller ever runs, e.g. group logo / avatar / chat media
+ *     uploads.
+ *   - a malformed JSON body makes express.json() throw before any route
+ *     handler runs.
+ *   - any *synchronous* throw or non-awaited rejection inside a controller
+ *     that isn't already wrapped in try/catch.
+ * Without this handler, Express's default error handler takes over and
+ * sends an HTML error page. The frontend (axios) can't parse that as JSON,
+ * so it just surfaces "Request failed with status code 500" with no body
+ * and no indication of what actually went wrong - which is exactly what
+ * shows up in the browser console for these cases. This must be registered
+ * last, after every other app.use()/route.
+ */
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  if (err instanceof multer.MulterError) {
+    const message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "File is too large."
+        : "File upload failed.";
+    return res.status(400).json({ message });
+  }
+
+  // fileFilter callbacks (imageOnlyUpload) reject with a plain Error, not a
+  // MulterError - multer still routes it through this same error path.
+  if (err && /only image files are allowed/i.test(err.message || "")) {
+    return res.status(400).json({ message: err.message });
+  }
+
+  if (err && err.type === "entity.parse.failed") {
+    return res.status(400).json({ message: "Malformed request body." });
+  }
+
+  console.error("UNHANDLED ERROR:", err);
+  return res.status(err?.status || 500).json({
+    error: "Internal server error",
+    message: process.env.NODE_ENV === "production" ? "Something went wrong." : err?.message,
+  });
 });
 
 /* ---------------- SOCKET LOGIC ---------------- */
@@ -305,6 +367,28 @@ io.on("connection", (socket) => {
             }
             io.to(String(memberId)).emit("receiveMessage", { senderId, groupId, message: translatedMsg });
             io.to(String(memberId)).emit("receive_message", { senderId, groupId, message: translatedMsg });
+
+            // Member has no active socket at all (app closed / not just
+            // backgrounded) - the realtime emit above never reaches them,
+            // so this is the only way they find out. Mirrors the existing
+            // sendCallPush(...) pattern for offline call alerts.
+            if (!onlineUsers[String(memberId)]) {
+              const senderMember = group.members.find(
+                (m) => String(m.user?._id || m.user) === String(senderId)
+              );
+              const senderName = senderMember?.user?.username || "Someone";
+              const preview =
+                message?.text ||
+                (message?.messageType === "voice" || message?.type === "voice"
+                  ? "🎤 Voice message"
+                  : message?.fileUrl || message?.file
+                  ? "Sent an attachment"
+                  : "New message");
+              sendMessagePush(memberId, {
+                senderName: group.name ? `${senderName} (${group.name})` : senderName,
+                preview,
+              }).catch(() => {});
+            }
           }
         }
 
@@ -343,6 +427,30 @@ io.on("connection", (socket) => {
       // Echo to sender room for multi-tab sync (client should dedupe by _id)
       io.to(String(senderId)).emit("receiveMessage", payload);
       io.to(String(senderId)).emit("receive_message", payload);
+
+      // Recipient has no active socket at all (app closed, not just
+      // backgrounded) - realtime delivery above never reaches them. This
+      // was previously never sent even though sendMessagePush() already
+      // existed, so background message alerts silently never fired.
+      if (!onlineUsers[String(receiverId)]) {
+        User.findById(senderId)
+          .select("username")
+          .lean()
+          .then((senderUser) => {
+            const preview =
+              message?.text ||
+              (message?.messageType === "voice" || message?.type === "voice"
+                ? "🎤 Voice message"
+                : message?.fileUrl || message?.file
+                ? "Sent an attachment"
+                : "New message");
+            return sendMessagePush(receiverId, {
+              senderName: senderUser?.username || "New message",
+              preview,
+            });
+          })
+          .catch(() => {});
+      }
 
       const hasFile = message?.fileUrl || message?.file;
       const hasLink = message?.text && /https?:\/\/\S+/i.test(message.text);

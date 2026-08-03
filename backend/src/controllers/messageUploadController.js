@@ -2,8 +2,10 @@ import mongoose from "mongoose";
 import Message from "../models/Message.js";
 import Conversation from "../models/Conversation.js";
 import FriendRequest from "../models/FriendRequest.js";
+import User from "../models/User.js";
 import { saveMessageMediaBuffer } from "../utils/mediaStorage.js";
 import { buildFileUrl } from "../utils/buildFileUrl.js";
+import { sendMessagePush } from "../utils/webPush.js";
 
 // POST /api/messages/upload
 export const uploadFile = async (req, res) => {
@@ -127,6 +129,10 @@ export const uploadFile = async (req, res) => {
     try {
       const io = req.app.get("io");
       const onlineUsers = req.app.get("onlineUsers") || {};
+      const preview =
+        (typeof text === "string" && text.trim()) ||
+        (type === "image" ? "📷 Photo" : type === "video" ? "🎥 Video" : type === "voice" ? "🎤 Voice message" : "Sent an attachment");
+
       if (io) {
         const messagePayload = savedMessage.toObject ? savedMessage.toObject() : { ...savedMessage };
         if (isGroup) {
@@ -135,6 +141,29 @@ export const uploadFile = async (req, res) => {
             groupId: String(groupId),
             message: messagePayload,
           });
+
+          // Push to any group member with no active socket at all - the
+          // room emit above never reaches them. Re-fetch with populated
+          // usernames since the earlier group lookup is out of scope here
+          // and only had raw member refs.
+          const GroupModel = (await import("../models/Group.js")).default;
+          const groupWithMembers = await GroupModel.findById(groupId)
+            .populate("members.user", "username")
+            .lean();
+          const senderMember = groupWithMembers?.members?.find(
+            (m) => String(m.user?._id || m.user) === String(senderId)
+          );
+          const senderName = senderMember?.user?.username || "Someone";
+          for (const m of groupWithMembers?.members || []) {
+            const memberId = String(m.user?._id || m.user);
+            if (memberId === String(senderId)) continue;
+            if (!onlineUsers[memberId]) {
+              sendMessagePush(memberId, {
+                senderName: groupWithMembers.name ? `${senderName} (${groupWithMembers.name})` : senderName,
+                preview,
+              }).catch(() => {});
+            }
+          }
         } else {
           const receiverSocket = onlineUsers[String(receiverId)];
           if (receiverSocket) {
@@ -157,6 +186,14 @@ export const uploadFile = async (req, res) => {
           };
           io.to(String(receiverId)).emit("new_message", newMessagePayload);
           io.to(String(senderId)).emit("new_message", newMessagePayload);
+
+          if (!onlineUsers[String(receiverId)]) {
+            User.findById(senderId)
+              .select("username")
+              .lean()
+              .then((senderUser) => sendMessagePush(receiverId, { senderName: senderUser?.username || "New message", preview }))
+              .catch(() => {});
+          }
         }
       }
     } catch (err) {

@@ -66,8 +66,13 @@ export default function TranslatedMessageBubble({
   const [showPicker, setShowPicker] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [mediaFailed, setMediaFailed] = useState(false);
   const longPressTimerRef = useRef(null);
   const containerRef = useRef(null);
+
+  useEffect(() => {
+    setMediaFailed(false);
+  }, [message.file]);
 
   const closeAll = () => {
     setShowMenu(false);
@@ -189,22 +194,38 @@ export default function TranslatedMessageBubble({
               )}
 
               {message.type === "image" && message.file && (
-                <img
-                  src={message.file}
-                  alt="sent"
-                  loading="lazy"
-                  onClick={() => setViewerOpen(true)}
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full cursor-pointer"
-                />
+                mediaFailed ? (
+                  <div className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full h-32 flex flex-col items-center justify-center gap-1 bg-black/10 text-current">
+                    <FiFile className="opacity-70" />
+                    <span className="text-[11px] opacity-70">Image unavailable</span>
+                  </div>
+                ) : (
+                  <img
+                    src={message.file}
+                    alt="sent"
+                    loading="lazy"
+                    onClick={() => setViewerOpen(true)}
+                    onError={() => setMediaFailed(true)}
+                    className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 object-cover w-full cursor-pointer"
+                  />
+                )
               )}
 
               {message.type === "video" && message.file && (
-                <video
-                  src={message.file}
-                  controls
-                  onClick={() => setViewerOpen(true)}
-                  className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full cursor-pointer"
-                />
+                mediaFailed ? (
+                  <div className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full h-32 flex flex-col items-center justify-center gap-1 bg-black/10 text-current">
+                    <FiFile className="opacity-70" />
+                    <span className="text-[11px] opacity-70">Video unavailable</span>
+                  </div>
+                ) : (
+                  <video
+                    src={message.file}
+                    controls
+                    onClick={() => setViewerOpen(true)}
+                    onError={() => setMediaFailed(true)}
+                    className="rounded-[12px] sm:rounded-[14px] max-h-40 sm:max-h-48 md:max-h-56 w-full cursor-pointer"
+                  />
+                )
               )}
 
               {message.type === "file" && message.file && (

@@ -1,11 +1,14 @@
-import React from "react";
-import { FiX, FiDownload } from "react-icons/fi";
+import React, { useState, useEffect } from "react";
+import { FiX, FiDownload, FiFile } from "react-icons/fi";
 
 /**
  * Full-screen viewer opened when a user taps a sent/received image or video
  * bubble. Lets them see it full-size and download the original file.
  */
 export default function MediaViewerModal({ url, type, fileName, onClose }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [url]);
+
   if (!url) return null;
 
   const handleDownload = async () => {
@@ -38,18 +41,26 @@ export default function MediaViewerModal({ url, type, fileName, onClose }) {
         <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
           <FiX size={22} />
         </button>
-        <button onClick={handleDownload} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Download">
-          <FiDownload size={22} />
-        </button>
+        {!failed && (
+          <button onClick={handleDownload} className="p-2 hover:bg-white/10 rounded-full transition-colors" title="Download">
+            <FiDownload size={22} />
+          </button>
+        )}
       </div>
       <div
         className="flex-1 flex items-center justify-center px-4 pb-4 min-h-0 overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {type === "image" ? (
+        {failed ? (
+          <div className="flex flex-col items-center gap-3 text-white/80">
+            <FiFile size={40} />
+            <p className="text-sm">This media is no longer available.</p>
+          </div>
+        ) : type === "image" ? (
           <img
             src={url}
             alt="media"
+            onError={() => setFailed(true)}
             className="w-auto h-auto max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg"
           />
         ) : (
@@ -57,6 +68,7 @@ export default function MediaViewerModal({ url, type, fileName, onClose }) {
             src={url}
             controls
             autoPlay
+            onError={() => setFailed(true)}
             className="w-auto h-auto max-w-full max-h-[calc(100vh-100px)] object-contain rounded-lg"
           />
         )}

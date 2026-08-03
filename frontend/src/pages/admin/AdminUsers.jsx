@@ -415,6 +415,10 @@ const AdminUsers = () => {
               <img
                 src={drawerUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(drawerUser.username)}`}
                 alt={drawerUser.username}
+                onError={(e) => {
+                  const fallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(drawerUser.username)}`;
+                  if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback;
+                }}
                 className="h-16 w-16 rounded-full object-cover border-2 border-gray-200 dark:border-neutral-600"
               />
               <div>

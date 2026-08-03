@@ -151,7 +151,10 @@ export default function CallScreen() {
                     </div>
                   </div>
                   <h1 style={callTheme.typography.callerName}>{name}</h1>
-                  <p style={callTheme.typography.status}>Calling{dots}</p>
+                  <p style={callTheme.typography.status}>
+                    {callState === "connecting" ? "Connecting" : "Calling"}
+                    {dots}
+                  </p>
                   {recipientOffline && (
                     <div className="mt-3 flex items-center gap-2 rounded-full bg-black/30 px-3 py-1.5 text-sm text-white/80">
                       <span className="h-2 w-2 rounded-full bg-gray-400" />
